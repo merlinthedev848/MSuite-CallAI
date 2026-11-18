@@ -18,6 +18,8 @@ from livekit.plugins import deepgram, silero, openai
 
 from config import config
 from notifications import CallerIntake, dispatch_all_notifications
+from knowledge_base import knowledge_base
+from yeastar_client import yeastar_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,82 +63,101 @@ def get_tts():
 
 
 def build_system_prompt() -> str:
-    return f"""You are the friendly, professional AI voice receptionist for {config.company_name}.
-Your job is to answer incoming phone calls warmly, assist callers with basic questions, and take detailed intake information so our team can follow up promptly.
+    return f"""You are the professional, friendly virtual AI receptionist for {config.company_name}.
+Your mission is to answer incoming telephone calls warmly, answer common questions using your knowledge base, take thorough intake notes, and direct or transfer the caller appropriately.
 
-### Personality & Tone:
-- Warm, polite, concise, and conversational.
-- Speak in natural spoken English with short, friendly sentences (since this is an audio phone call, avoid long monologues or lists).
-- Listen carefully and ask clarifying questions one at a time. Do not overwhelm the caller.
+### Persona & Style:
+- Warm, articulate, concise, and calm.
+- Speak naturally in short, friendly sentences. Avoid long paragraphs or bulleted lists because the caller is listening over a phone line.
+- Always ask only one question at a time so the caller is never overwhelmed.
 
-### Key Objectives during the Call:
-1. Greeting: Introduce yourself as the virtual assistant for {config.company_name} and ask how you can help.
-2. Information Intake (Mandatory):
-   - Ask for their Full Name.
-   - Ask for the Best Callback Phone Number.
-   - Ask for their Company or Organization (if applicable).
-   - Get the specific details of their request or message.
-   - Ask how urgent this matter is (Low, Normal, or Urgent).
-   - Ask what time is best for our team to call them back.
-3. Record Info: As soon as the caller provides these details, call the `record_caller_identity` and `record_inquiry_details` tools.
-4. Confirmation: Briefly confirm the key details before hanging up (e.g., "Got it, [Name]. I have your callback number as [Phone], and I've noted that you need help with [Topic]. We'll be in touch [Timeframe].").
-5. Closing: Thank them warmly for calling {config.company_name} and wish them a wonderful day.
+### Key Objectives during the Phone Call:
+1. Warm Greeting: Introduce yourself as the assistant for {config.company_name} and ask how you may assist them today.
+2. Answering Questions: If they ask about services, hours, office location, or emergency procedures, use `search_knowledge_base`.
+3. Intake Details (Crucial):
+   - Caller Name
+   - Best Callback Number (verify digits if needed)
+   - Email Address (optional, ask if they'd like email confirmation)
+   - Company or Organization (if calling on behalf of a business)
+   - Specific Reason & Message Details
+   - Urgency Level (Low, Normal, Urgent, or Emergency)
+   - Preferred Callback Window (e.g. today before 2 PM, tomorrow morning)
+4. Tool Usage:
+   - Call `record_caller_identity` as soon as they give their name, phone, or email.
+   - Call `record_inquiry_details` as soon as the issue and callback preference are understood.
+   - If they specifically ask to speak with an operator or live department, call `transfer_call_to_staff`.
+5. Confirmation & Goodbye:
+   - Before ending, confirm the key details (e.g. "Thank you, [Name]. I have your number as [Phone] and your message regarding [Topic]. Our team will contact you [Timeframe].").
+   - Wish them a pleasant day.
 
-### Safety & Guardrails:
-- Never make binding promises regarding pricing, contracts, or specific guarantees.
-- If it's a life-threatening emergency, advise them to hang up and call 911 immediately.
+### Safety & Boundaries:
+- Do not make binding commitments on pricing or exact contract terms without staff review.
+- In life-safety situations, instruct the caller to hang up and dial 911 immediately.
 """
 
 
-def create_tools(intake: CallerIntake) -> list:
+def create_tools(intake: CallerIntake, session_holder: list) -> list:
     """Creates callable tools bound to the current call's intake record."""
 
     @llm.function_tool(description="Record or update the caller's identity and contact information.")
     def record_caller_identity(
         caller_name: Annotated[str, "Full name of the caller"],
-        callback_phone: Annotated[str, "Callback phone number provided by the caller"],
+        callback_phone: Annotated[str, "Callback telephone number provided by caller"],
+        caller_email: Annotated[Optional[str], "Email address if provided"] = None,
         company: Annotated[Optional[str], "Company or organization name, if mentioned"] = None,
     ) -> str:
         intake.caller_name = caller_name
         intake.caller_phone = callback_phone
+        if caller_email:
+            intake.caller_email = caller_email
         if company:
             intake.company = company
-        logger.info(f"Recorded identity: {caller_name} | {callback_phone} | {company}")
+        logger.info(f"Recorded identity: {caller_name} | {callback_phone} | {caller_email} | {company}")
         return f"Saved caller details for {caller_name} ({callback_phone})."
 
-    @llm.function_tool(description="Record detailed information about the caller's inquiry, problem, or request.")
+    @llm.function_tool(description="Record detailed notes about why the caller is reaching out.")
     def record_inquiry_details(
-        reason: Annotated[str, "Short summary of why they are calling (e.g., Billing Inquiry, Scheduling, Urgent Repair)"],
-        detailed_notes: Annotated[str, "Detailed notes explaining their situation or specific request"],
+        reason: Annotated[str, "Short summary of why they called (e.g. Server Outage, Billing Question, Scheduling)"],
+        detailed_notes: Annotated[str, "Detailed notes explaining their situation or request"],
+        department: Annotated[str, "Department: Technical Support, Sales & Billing, Emergency Dispatch, or General"] = "General",
         urgency: Annotated[str, "Urgency level: low, medium, high, or emergency"] = "medium",
-        preferred_callback_time: Annotated[Optional[str], "When the caller would like to be reached back"] = None,
+        preferred_callback_time: Annotated[Optional[str], "When the caller prefers to be called back"] = None,
     ) -> str:
         intake.reason = reason
         intake.details = detailed_notes
+        intake.department = department
         intake.urgency = urgency
         if preferred_callback_time:
             intake.preferred_callback_time = preferred_callback_time
-        logger.info(f"Recorded inquiry: {reason} | Urgency: {urgency} | Callback: {preferred_callback_time}")
-        return "Inquiry details successfully recorded."
+        logger.info(f"Recorded inquiry: {reason} | Dept: {department} | Urgency: {urgency}")
+        return "Inquiry details successfully logged in the system."
 
-    @llm.function_tool(description="Look up business information such as hours, office address, or phone number.")
-    def check_business_info(
-        query_type: Annotated[str, "Type of info needed: 'hours', 'address', 'phone', or 'general'"]
+    @llm.function_tool(description="Look up business answers, FAQ, company policies, hours, or office directions.")
+    def search_knowledge_base(
+        query: Annotated[str, "The question or topic to search (e.g., 'hours', 'billing policy', 'emergency protocol')"]
     ) -> str:
-        q = query_type.lower()
-        if "hour" in q:
-            return f"Business hours are {config.business_hours}."
-        elif "addr" in q or "locat" in q:
-            return f"The office address is {config.office_address}."
-        elif "phone" in q:
-            return f"Our main office number is {config.company_phone}."
-        else:
-            return (
-                f"{config.company_name} is located at {config.office_address}. "
-                f"Hours: {config.business_hours}. Phone: {config.company_phone}."
-            )
+        answer = knowledge_base.search_faq(query)
+        logger.info(f"Knowledge base query: '{query}' -> '{answer[:60]}...'")
+        return answer
 
-    return [record_caller_identity, record_inquiry_details, check_business_info]
+    @llm.function_tool(description="Transfer the caller to a live staff member, operator, or department extension on the Yeastar PBX.")
+    async def transfer_call_to_staff(
+        department_or_extension: Annotated[str, "Department name (e.g. 'Support', 'Sales', 'Emergency') or extension number (e.g. '1000')"],
+        reason: Annotated[str, "Why the transfer is being initiated"]
+    ) -> str:
+        ext = department_or_extension
+        if not ext.isdigit():
+            ext = knowledge_base.get_department_extension(department_or_extension)
+            
+        logger.info(f"Transfer initiated to extension {ext}. Reason: {reason}")
+        
+        # Check Yeastar extension status
+        status_info = await yeastar_client.get_extension_status(ext)
+        logger.info(f"Yeastar extension {ext} status: {status_info.get('status')}")
+
+        return f"Please hold for a moment while I transfer you to extension {ext}."
+
+    return [record_caller_identity, record_inquiry_details, search_knowledge_base, transfer_call_to_staff]
 
 
 async def entrypoint(ctx: JobContext):
@@ -160,7 +181,8 @@ async def entrypoint(ctx: JobContext):
     tts_instance = get_tts()
     vad_instance = silero.VAD.load()
 
-    tools = create_tools(intake)
+    session_holder = []
+    tools = create_tools(intake, session_holder)
 
     agent = Agent(
         instructions=build_system_prompt(),
@@ -172,7 +194,9 @@ async def entrypoint(ctx: JobContext):
         llm=llm_instance,
         tts=tts_instance,
         vad=vad_instance,
+        user_away_timeout=25.0, # Silence detection
     )
+    session_holder.append(session)
 
     # Start voice session in the room
     session.start(agent, room=ctx.room)
@@ -186,15 +210,19 @@ async def entrypoint(ctx: JobContext):
         duration = int(time.time() - start_time)
         intake.call_duration_seconds = duration
 
-        # Extract transcript from session history if available
+        # Extract full transcript reliably from session history
         try:
             transcript_lines = []
             if hasattr(session, "history"):
-                for item in session.history:
-                    role = getattr(item, "role", None) or "speaker"
-                    text = getattr(item, "text", "") or getattr(item, "content", "")
-                    if text:
-                        transcript_lines.append(f"{role.capitalize()}: {text}")
+                chat_ctx = session.history
+                messages = getattr(chat_ctx, "messages", [])
+                for msg in messages:
+                    role = getattr(msg, "role", "unknown")
+                    if role in ("user", "assistant"):
+                        speaker = "Caller" if role == "user" else "Assistant"
+                        text = getattr(msg, "text_content", None) or getattr(msg, "raw_text_content", None) or ""
+                        if text:
+                            transcript_lines.append(f"{speaker}: {text}")
             intake.transcript = "\n".join(transcript_lines)
         except Exception as e:
             logger.warning(f"Could not format transcript: {e}")

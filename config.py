@@ -11,6 +11,13 @@ class AppConfig(BaseModel):
     business_hours: str = Field(default=os.getenv("BUSINESS_HOURS", "Monday to Friday 9:00 AM - 5:00 PM"))
     office_address: str = Field(default=os.getenv("OFFICE_ADDRESS", "Main Office"))
 
+    # Yeastar S100 / PBX API Settings
+    yeastar_host: str = Field(default=os.getenv("YEASTAR_HOST", "192.168.1.100"))
+    yeastar_port: int = Field(default=int(os.getenv("YEASTAR_PORT", "8088")))
+    yeastar_username: str = Field(default=os.getenv("YEASTAR_USERNAME", "api_user"))
+    yeastar_password: str = Field(default=os.getenv("YEASTAR_PASSWORD", ""))
+    default_staff_extension: str = Field(default=os.getenv("DEFAULT_STAFF_EXTENSION", "1000"))
+
     # LiveKit
     livekit_url: str = Field(default=os.getenv("LIVEKIT_URL", ""))
     livekit_api_key: str = Field(default=os.getenv("LIVEKIT_API_KEY", ""))

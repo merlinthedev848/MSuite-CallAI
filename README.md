@@ -7,11 +7,11 @@ A real-time, low-latency conversational AI agent designed to answer incoming pho
 ## 🌟 Key Features
 
 - **Sub-Second Latency & Natural Voice**: Uses streaming STT (Deepgram), fast LLM inference (Gemini / OpenAI / Groq), and natural streaming TTS (Cartesia / ElevenLabs) with interruptibility (barge-in support).
-- **Local AI / Ollama Processing**: Support for your local Ollama server (e.g. `llama3.1`, `qwen2.5`, `mistral`) for both **real-time voice conversation** and **post-call private transcript synthesis** and structured extraction.
-- **Universal PBX & VoIP Compatibility**: Works with **Yeastar S100 / S-Series & P-Series**, **FreePBX / Asterisk**, **Grandstream UCM**, **3CX**, **RingCentral**, and direct SIP carriers (Twilio / Telnyx) via LiveKit SIP ingress.
-- **SQLite Database & Call Detail Records (CDR)**: Automatically stores all call metadata, caller details, transcripts, and statuses (`new`, `in_progress`, `called_back`, `archived`).
-- **Interactive Web Dashboard & REST API**: Live responsive web UI (`server.py`) for staff to review intakes, search/filter calls, listen/read transcripts, mark callbacks as resolved, and export to CSV.
-- **Docker & Docker Compose Ready**: One-click containerization with `Dockerfile` and `docker-compose.yml`.
+- **Local AI / Ollama Processing**: Support for your local Ollama server (e.g. `llama3.1`, `qwen2.5`, `mistral`) for both **real-time voice conversation** and **post-call private transcript synthesis**, sentiment evaluation, and action item extraction.
+- **Universal PBX & Yeastar S100 Native Integration**: Works with **Yeastar S100 / S-Series & P-Series**, FreePBX, 3CX, Grandstream, and features **Yeastar Click-to-Dial** directly from the web dashboard.
+- **Dynamic Knowledge Base**: Answers caller questions about business hours, office directions, pricing policies, and department routing.
+- **Live WebSocket Dashboard**: Real-time push updates to staff screens, interactive analytics charts, and call status management (`new`, `in_progress`, `called_back`, `archived`).
+- **Comprehensive Automated Test Suite**: Full test coverage with `pytest` and `pytest-asyncio`.
 - **Detailed Intake & Function Calling**: Dynamically extracts caller name, callback number, reason for call, message details, urgency level, and preferred callback time.
 - **Instant Dispatch**: Automatically sends beautiful HTML summaries and full transcripts via Email (SMTP / Resend / SendGrid) and instant SMS alerts to your team.
 - **Local Dev Playground**: Test the agent directly from your microphone and web browser before connecting your phone lines.

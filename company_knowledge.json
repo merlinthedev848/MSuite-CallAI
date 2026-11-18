@@ -1,0 +1,32 @@
+{
+  "company_overview": {
+    "name": "Acme Services",
+    "description": "Leading provider of enterprise technology solutions, managed IT services, and emergency repair.",
+    "phone": "+1 (555) 123-4567",
+    "email": "support@example.com",
+    "address": "123 Main Street, Suite 400, New York, NY 10001",
+    "hours": "Monday to Friday: 8:30 AM - 5:30 PM EST. 24/7 Emergency on-call support."
+  },
+  "departments": [
+    {"name": "Technical Support", "extension": "1001", "description": "Troubleshooting, server issues, network outages."},
+    {"name": "Sales & Billing", "extension": "1002", "description": "New service inquiries, quotes, contract renewals, invoices."},
+    {"name": "Emergency Dispatch", "extension": "1000", "description": "Critical outages, safety concerns, urgent on-site dispatches."}
+  ],
+  "faq": [
+    {
+      "topic": "emergency_service",
+      "question": "What counts as an emergency?",
+      "answer": "Complete server outages, ransomware or security incidents, and total network downtime qualify for priority emergency dispatch."
+    },
+    {
+      "topic": "billing",
+      "question": "When are invoices due?",
+      "answer": "Invoices are net 30 days from invoice date. We accept ACH, credit cards, and wire transfers."
+    },
+    {
+      "topic": "appointments",
+      "question": "How quickly can a technician visit on-site?",
+      "answer": "For contract clients, emergency on-site response is within 2 hours. Standard consultations are scheduled within 24 to 48 hours."
+    }
+  ]
+}
