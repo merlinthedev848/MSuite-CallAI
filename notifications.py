@@ -1,14 +1,18 @@
 import logging
 import datetime
 import json
+import asyncio
 from typing import Optional, List
 from email.message import EmailMessage
 import aiohttp
 import aiosmtplib
 from pydantic import BaseModel, Field
+
 from config import config
+from database import CallRecord, save_call_record
 
 logger = logging.getLogger("phone_agent.notifications")
+
 
 class CallerIntake(BaseModel):
     caller_name: str = Field(default="Unknown Caller")
@@ -18,8 +22,8 @@ class CallerIntake(BaseModel):
     department: Optional[str] = Field(default="General")
     reason: str = Field(default="General Inquiry")
     details: str = Field(default="No specific details recorded.")
-    urgency: str = Field(default="medium") # low, medium, high, emergency
-    sentiment: Optional[str] = Field(default="neutral") # positive, neutral, frustrated, angry
+    urgency: str = Field(default="medium")  # low, medium, high, emergency
+    sentiment: Optional[str] = Field(default="neutral")  # positive, neutral, frustrated, angry
     action_items: Optional[List[str]] = Field(default_factory=list)
     tags: Optional[List[str]] = Field(default_factory=list)
     preferred_callback_time: Optional[str] = Field(default=None)
@@ -32,56 +36,60 @@ class CallerIntake(BaseModel):
 
 async def enrich_with_local_ollama(intake: CallerIntake) -> None:
     """
-    Uses local Ollama AI with structured JSON mode to analyze the call transcript,
-    extract key details, evaluate caller sentiment, generate an action checklist, and score urgency.
+    Enriches call data with local Ollama structured intelligence.
+    Extracts missing fields, sentiment, action items, and executive summary.
     """
+    # Generate baseline fallback summary immediately
+    fallback_summary = f"{intake.caller_name} called regarding '{intake.reason}'. {intake.details}"
+    if not intake.ai_summary:
+        intake.ai_summary = fallback_summary
+
     if not config.use_ollama_for_post_call_summary or not intake.transcript:
         return
 
-    prompt = f"""You are an expert executive phone intake analyst. Analyze this call transcript between a virtual receptionist and a caller.
+    prompt = f"""You are an elite telephone intake intelligence analyst. Analyze this conversation between a virtual receptionist and a caller.
 
 Transcript:
 {intake.transcript}
 
-Return a valid JSON object matching this schema:
+Return ONLY a valid JSON object matching this schema with no markdown fences:
 {{
   "caller_name": "Full name or 'Unknown'",
   "caller_phone": "Phone number or 'Not Provided'",
   "caller_email": "Email address or null",
   "company": "Company or organization or null",
   "department": "Technical Support, Sales & Billing, Emergency Dispatch, or General",
-  "reason": "Short summary of why they called",
-  "executive_summary": "Crisp 2-sentence summary of the conversation and situation",
+  "reason": "Clear 4-7 word summary of reason for call",
+  "executive_summary": "Crisp 2-sentence executive summary for staff",
   "urgency": "low, medium, high, or emergency",
   "sentiment": "positive, neutral, frustrated, or angry",
   "action_items": ["Action item 1 for staff", "Action item 2 for staff"],
   "tags": ["#tag1", "#tag2"],
-  "preferred_callback_time": "Time specified or null"
+  "preferred_callback_time": "Preferred callback time or null"
 }}
 """
     endpoint = f"{config.ollama_base_url.rstrip('/')}/chat/completions"
     payload = {
         "model": config.ollama_model,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "format": "json",
         "temperature": 0.1
     }
 
     try:
-        logger.info(f"Connecting to local Ollama ({config.ollama_model}) at {endpoint} for structured analysis...")
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, json=payload, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+        logger.info(f"Analyzing transcript via local Ollama ({config.ollama_model}) at {endpoint}...")
+        timeout = aiohttp.ClientTimeout(total=config.ollama_timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(endpoint, json=payload) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     
                     parsed = json.loads(content.strip())
                     
-                    if intake.caller_name == "Unknown Caller" and parsed.get("caller_name"):
+                    if intake.caller_name in ("Unknown Caller", "Unknown") and parsed.get("caller_name"):
                         intake.caller_name = parsed["caller_name"]
-                    if intake.caller_phone == "Not Provided" and parsed.get("caller_phone"):
+                    if intake.caller_phone in ("Not Provided", "") and parsed.get("caller_phone"):
                         intake.caller_phone = parsed["caller_phone"]
                     if not intake.caller_email and parsed.get("caller_email"):
                         intake.caller_email = parsed["caller_email"]
@@ -101,12 +109,12 @@ Return a valid JSON object matching this schema:
                         intake.tags = parsed["tags"]
                     if not intake.preferred_callback_time and parsed.get("preferred_callback_time"):
                         intake.preferred_callback_time = parsed["preferred_callback_time"]
-                        
-                    logger.info("Successfully completed local Ollama structured intelligence analysis.")
+
+                    logger.info("Local Ollama synthesis completed successfully.")
                 else:
-                    logger.warning(f"Ollama returned HTTP status {resp.status}. Using in-call captured fields.")
+                    logger.warning(f"Ollama returned status {resp.status}. Retaining baseline intake.")
     except Exception as e:
-        logger.info(f"Local Ollama analysis skipped or unavailable ({e}). Continuing with in-call fields.")
+        logger.info(f"Ollama enrichment skipped or offline ({e}). Using captured fields.")
 
 
 def generate_email_html(intake: CallerIntake) -> str:
@@ -115,13 +123,13 @@ def generate_email_html(intake: CallerIntake) -> str:
         "medium": "#007bff",
         "high": "#fd7e14",
         "emergency": "#dc3545",
-    }.get(intake.urgency.lower(), "#007bff")
+    }.get(str(intake.urgency).lower(), "#007bff")
 
     sentiment_badge = {
-        "positive": '<span style="background-color: #d4edda; color: #155724; padding: 3px 8px; border-radius: 4px; font-size: 11px;">😊 Positive</span>',
-        "neutral": '<span style="background-color: #e2e3e5; color: #383d41; padding: 3px 8px; border-radius: 4px; font-size: 11px;">😐 Neutral</span>',
-        "frustrated": '<span style="background-color: #fff3cd; color: #856404; padding: 3px 8px; border-radius: 4px; font-size: 11px;">😤 Frustrated</span>',
-        "angry": '<span style="background-color: #f8d7da; color: #721c24; padding: 3px 8px; border-radius: 4px; font-size: 11px;">😡 Urgent / Angry</span>'
+        "positive": '<span style="background-color: #d4edda; color: #155724; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;">😊 Positive</span>',
+        "neutral": '<span style="background-color: #e2e3e5; color: #383d41; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;">😐 Neutral</span>',
+        "frustrated": '<span style="background-color: #fff3cd; color: #856404; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;">😤 Frustrated</span>',
+        "angry": '<span style="background-color: #f8d7da; color: #721c24; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold;">😡 Urgent / Angry</span>'
     }.get(str(intake.sentiment).lower(), "")
 
     time_str = intake.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -130,7 +138,7 @@ def generate_email_html(intake: CallerIntake) -> str:
     if intake.ai_summary:
         ai_summary_box = f"""
         <div style="background-color: #f0f7ff; border-left: 4px solid #0066cc; padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0;">
-            <p style="margin: 0; font-size: 12px; font-weight: 700; color: #004c99; text-transform: uppercase;">Executive AI Summary (Ollama):</p>
+            <p style="margin: 0; font-size: 11px; font-weight: 700; color: #004c99; text-transform: uppercase;">Executive Summary (Ollama):</p>
             <p style="margin: 6px 0 0 0; font-size: 14px; color: #1e3a8a; line-height: 1.5;">{intake.ai_summary}</p>
         </div>
         """
@@ -140,7 +148,7 @@ def generate_email_html(intake: CallerIntake) -> str:
         items_html = "".join([f"<li style='margin-bottom: 4px;'>{item}</li>" for item in intake.action_items])
         action_items_box = f"""
         <div style="background-color: #fff9db; border: 1px solid #ffe066; padding: 12px 18px; border-radius: 6px; margin: 16px 0;">
-            <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; color: #856404; text-transform: uppercase;">Recommended Next Steps for Staff:</p>
+            <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; color: #856404; text-transform: uppercase;">Recommended Next Steps for Staff:</p>
             <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #533f03; line-height: 1.4;">
                 {items_html}
             </ul>
@@ -149,16 +157,16 @@ def generate_email_html(intake: CallerIntake) -> str:
 
     tags_html = ""
     if intake.tags:
-        tags_badges = " ".join([f"<span style='background:#e9ecef;color:#495057;padding:2px 8px;border-radius:10px;font-size:11px;'>{t}</span>" for t in intake.tags])
-        tags_html = f"<div style='margin-top: 12px;'>{tags_badges}</div>"
+        tags_badges = " ".join([f"<span style='background:#e9ecef;color:#495057;padding:3px 8px;border-radius:12px;font-size:11px;margin-right:4px;'>{t}</span>" for t in intake.tags])
+        tags_html = f"<div style='margin-top: 14px;'>{tags_badges}</div>"
 
     transcript_html = ""
     if intake.transcript:
         escaped_transcript = intake.transcript.replace("\n", "<br>")
         transcript_html = f"""
         <div style="margin-top: 24px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
-            <h3 style="color: #333; margin-bottom: 8px;">Full Conversation Transcript</h3>
-            <div style="background: #f8f9fa; border: 1px solid #eee; border-radius: 6px; padding: 14px; font-family: monospace; font-size: 13px; max-height: 350px; overflow-y: auto; line-height: 1.5; color: #444;">
+            <h3 style="color: #333; margin-bottom: 8px; font-size: 14px;">Full Call Transcript</h3>
+            <div style="background: #f8f9fa; border: 1px solid #eee; border-radius: 6px; padding: 14px; font-family: monospace; font-size: 12px; max-height: 350px; overflow-y: auto; line-height: 1.6; color: #444;">
                 {escaped_transcript}
             </div>
         </div>
@@ -174,15 +182,15 @@ def generate_email_html(intake: CallerIntake) -> str:
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 24px;">
         <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 620px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden;">
             <tr>
-                <td style="background-color: #1a202c; padding: 20px 24px;">
+                <td style="background-color: #0f172a; padding: 20px 24px;">
                     <table width="100%">
                         <tr>
                             <td>
-                                <h2 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 600;">{config.company_name} - Phone Intake</h2>
-                                <span style="color: #cbd5e0; font-size: 12px;">Dept: {intake.department}</span>
+                                <h2 style="color: #ffffff; margin: 0; font-size: 18px; font-weight: 700;">{config.company_name} - Phone Intake</h2>
+                                <span style="color: #94a3b8; font-size: 12px;">Routing Dept: {intake.department}</span>
                             </td>
                             <td align="right">
-                                <span style="background-color: {urgency_color}; color: white; padding: 5px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; text-transform: uppercase;">
+                                <span style="background-color: {urgency_color}; color: white; padding: 5px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase;">
                                     {intake.urgency}
                                 </span>
                             </td>
@@ -193,7 +201,7 @@ def generate_email_html(intake: CallerIntake) -> str:
             <tr>
                 <td style="padding: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <span style="color: #718096; font-size: 13px;">Call received on <strong>{time_str}</strong></span>
+                        <span style="color: #64748b; font-size: 12px;">Call logged on <strong>{time_str}</strong></span>
                         {sentiment_badge}
                     </div>
                     
@@ -202,33 +210,33 @@ def generate_email_html(intake: CallerIntake) -> str:
 
                     <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin-top: 12px;">
                         <tr style="border-bottom: 1px solid #edf2f7;">
-                            <td style="width: 32%; color: #718096; font-size: 13px; font-weight: 600;">CALLER NAME</td>
-                            <td style="color: #1a202c; font-size: 15px; font-weight: 600;">{intake.caller_name}</td>
+                            <td style="width: 32%; color: #64748b; font-size: 12px; font-weight: 600;">CALLER NAME</td>
+                            <td style="color: #0f172a; font-size: 14px; font-weight: 600;">{intake.caller_name}</td>
                         </tr>
                         <tr style="border-bottom: 1px solid #edf2f7;">
-                            <td style="color: #718096; font-size: 13px; font-weight: 600;">PHONE NUMBER</td>
-                            <td style="color: #1a202c; font-size: 15px;">
-                                <a href="tel:{intake.caller_phone}" style="color: #0066cc; text-decoration: none; font-weight: 600;">{intake.caller_phone}</a>
+                            <td style="color: #64748b; font-size: 12px; font-weight: 600;">PHONE NUMBER</td>
+                            <td style="color: #0f172a; font-size: 14px;">
+                                <a href="tel:{intake.caller_phone}" style="color: #2563eb; text-decoration: none; font-weight: 600;">{intake.caller_phone}</a>
                             </td>
                         </tr>
-                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #718096; font-size: 13px; font-weight: 600;">EMAIL</td><td style="color: #1a202c; font-size: 14px;"><a href="mailto:{intake.caller_email}">{intake.caller_email}</a></td></tr>' if intake.caller_email else ''}
-                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #718096; font-size: 13px; font-weight: 600;">COMPANY</td><td style="color: #1a202c; font-size: 14px;">{intake.company}</td></tr>' if intake.company else ''}
+                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #64748b; font-size: 12px; font-weight: 600;">EMAIL</td><td style="color: #0f172a; font-size: 13px;"><a href="mailto:{intake.caller_email}">{intake.caller_email}</a></td></tr>' if intake.caller_email else ''}
+                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #64748b; font-size: 12px; font-weight: 600;">COMPANY</td><td style="color: #0f172a; font-size: 13px;">{intake.company}</td></tr>' if intake.company else ''}
                         <tr style="border-bottom: 1px solid #edf2f7;">
-                            <td style="color: #718096; font-size: 13px; font-weight: 600;">REASON FOR CALL</td>
-                            <td style="color: #1a202c; font-size: 14px; font-weight: 600;">{intake.reason}</td>
+                            <td style="color: #64748b; font-size: 12px; font-weight: 600;">REASON FOR CALL</td>
+                            <td style="color: #0f172a; font-size: 14px; font-weight: 600;">{intake.reason}</td>
                         </tr>
                         <tr style="border-bottom: 1px solid #edf2f7;">
-                            <td style="color: #718096; font-size: 13px; font-weight: 600; vertical-align: top;">MESSAGE DETAILS</td>
-                            <td style="color: #2d3748; font-size: 14px; line-height: 1.5;">{intake.details}</td>
+                            <td style="color: #64748b; font-size: 12px; font-weight: 600; vertical-align: top;">MESSAGE DETAILS</td>
+                            <td style="color: #334155; font-size: 13px; line-height: 1.5;">{intake.details}</td>
                         </tr>
-                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #718096; font-size: 13px; font-weight: 600;">PREFERRED CALLBACK</td><td style="color: #1a202c; font-size: 14px;">{intake.preferred_callback_time}</td></tr>' if intake.preferred_callback_time else ''}
-                        {f'<tr><td style="color: #718096; font-size: 13px; font-weight: 600;">DURATION</td><td style="color: #718096; font-size: 13px;">{intake.call_duration_seconds}s</td></tr>' if intake.call_duration_seconds else ''}
+                        {f'<tr style="border-bottom: 1px solid #edf2f7;"><td style="color: #64748b; font-size: 12px; font-weight: 600;">PREFERRED CALLBACK</td><td style="color: #0f172a; font-size: 13px;">{intake.preferred_callback_time}</td></tr>' if intake.preferred_callback_time else ''}
+                        {f'<tr><td style="color: #64748b; font-size: 12px; font-weight: 600;">DURATION</td><td style="color: #64748b; font-size: 13px;">{intake.call_duration_seconds}s</td></tr>' if intake.call_duration_seconds else ''}
                     </table>
 
                     {tags_html}
 
                     <div style="margin-top: 24px; text-align: center;">
-                        <a href="tel:{intake.caller_phone}" style="display: inline-block; background-color: #0066cc; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; padding: 10px 24px; border-radius: 6px;">
+                        <a href="tel:{intake.caller_phone}" style="display: inline-block; background-color: #2563eb; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 600; padding: 10px 24px; border-radius: 6px;">
                             📞 Call Back Now
                         </a>
                     </div>
@@ -237,8 +245,8 @@ def generate_email_html(intake: CallerIntake) -> str:
                 </td>
             </tr>
             <tr>
-                <td style="background-color: #f7fafc; padding: 14px 24px; text-align: center; border-top: 1px solid #edf2f7; color: #a0aec0; font-size: 12px;">
-                    Automated voice intake powered by {config.company_name} AI Phone Agent
+                <td style="background-color: #f8fafc; padding: 14px 24px; text-align: center; border-top: 1px solid #edf2f7; color: #94a3b8; font-size: 11px;">
+                    Automated voice intake powered by {config.company_name} AI Phone Agent & Yeastar S100
                 </td>
             </tr>
         </table>
@@ -248,12 +256,12 @@ def generate_email_html(intake: CallerIntake) -> str:
 
 
 async def send_email_notification(intake: CallerIntake) -> bool:
+    """Dispatches HTML email via SMTP with correct TLS / SSL handling."""
     if not config.email_enabled:
-        logger.info("Email notifications disabled in configuration.")
         return False
 
     if not config.smtp_user or not config.smtp_password or not config.notification_recipient_email:
-        logger.warning("SMTP credentials or recipient email missing. Skipping email dispatch.")
+        logger.warning("SMTP configuration incomplete. Skipping email dispatch.")
         return False
 
     recipients = [r.strip() for r in config.notification_recipient_email.split(",") if r.strip()]
@@ -285,25 +293,53 @@ Transcript:
     msg.set_content(plain_text)
     msg.add_alternative(generate_email_html(intake), subtype="html")
 
+    # Correct TLS/SSL logic for port 465 (SSL) vs port 587 (STARTTLS)
+    use_direct_ssl = (config.smtp_port == 465)
+    use_start_tls = config.smtp_use_tls and not use_direct_ssl
+
     try:
         await aiosmtplib.send(
             msg,
             hostname=config.smtp_host,
             port=config.smtp_port,
-            start_tls=config.smtp_use_tls,
+            use_tls=use_direct_ssl,
+            start_tls=use_start_tls,
             username=config.smtp_user,
             password=config.smtp_password,
+            timeout=10
         )
-        logger.info(f"Email notification dispatched successfully to {recipients}")
+        logger.info(f"Email notification successfully delivered to {recipients}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send email notification: {e}")
+        logger.error(f"Failed to deliver email notification: {e}")
         return False
 
 
+def _send_twilio_sms_sync(intake: CallerIntake) -> bool:
+    """Synchronous Twilio client execution called in thread pool."""
+    from twilio.rest import Client
+    client = Client(config.twilio_account_sid, config.twilio_auth_token)
+    
+    summary_text = intake.ai_summary or intake.details
+    sms_body = (
+        f"📞 New Call [{intake.urgency.upper()}]\n"
+        f"Caller: {intake.caller_name} ({intake.caller_phone})\n"
+        f"Dept: {intake.department}\n"
+        f"Note: {summary_text[:110]}"
+    )
+
+    message = client.messages.create(
+        body=sms_body,
+        from_=config.twilio_from_number,
+        to=config.notification_recipient_phone,
+    )
+    logger.info(f"SMS notification sent. SID: {message.sid}")
+    return True
+
+
 async def send_sms_notification(intake: CallerIntake) -> bool:
+    """Dispatches SMS notification asynchronously without blocking event loop."""
     if not config.sms_enabled:
-        logger.info("SMS notifications disabled in configuration.")
         return False
 
     if not config.twilio_account_sid or not config.twilio_auth_token or not config.notification_recipient_phone:
@@ -311,40 +347,20 @@ async def send_sms_notification(intake: CallerIntake) -> bool:
         return False
 
     try:
-        from twilio.rest import Client
-        client = Client(config.twilio_account_sid, config.twilio_auth_token)
-        
-        summary_text = intake.ai_summary or intake.details
-        sms_body = (
-            f"📞 New Intake [{intake.urgency.upper()}]\n"
-            f"From: {intake.caller_name} ({intake.caller_phone})\n"
-            f"Dept: {intake.department}\n"
-            f"Summary: {summary_text[:110]}..."
-        )
-
-        message = client.messages.create(
-            body=sms_body,
-            from_=config.twilio_from_number,
-            to=config.notification_recipient_phone,
-        )
-        logger.info(f"SMS notification sent. Twilio SID: {message.sid}")
-        return True
+        return await asyncio.to_thread(_send_twilio_sms_sync, intake)
     except Exception as e:
         logger.error(f"Failed to send SMS notification: {e}")
         return False
 
 
 async def dispatch_all_notifications(intake: CallerIntake):
-    """Enriches with Ollama if configured, saves to SQLite DB, then dispatches alerts concurrently."""
-    import asyncio
-    from database import CallRecord, save_call_record
-    
+    """Orchestrates Ollama enrichment, DB persistence, and alert dispatch."""
     # 1. Run local Ollama post-call analysis
     await enrich_with_local_ollama(intake)
 
     # 2. Persist in local SQLite database
+    call_id = intake.call_id or f"call-{int(intake.timestamp.timestamp())}"
     try:
-        call_id = intake.call_id or f"call-{int(intake.timestamp.timestamp())}"
         db_record = CallRecord(
             call_id=call_id,
             caller_name=intake.caller_name,
@@ -365,14 +381,25 @@ async def dispatch_all_notifications(intake: CallerIntake):
             status="new"
         )
         save_call_record(db_record)
-        logger.info(f"Saved call record {call_id} to database.")
+        logger.info(f"Persisted call record '{call_id}' to SQLite database.")
     except Exception as e:
-        logger.error(f"Failed to persist call record in database: {e}")
+        logger.error(f"Database persistence failure for '{call_id}': {e}")
 
-    # 3. Dispatch Email and SMS alerts concurrently
-    results = await asyncio.gather(
+    # 3. Broadcast to all active web dashboards via WebSocket
+    try:
+        from server import ws_manager
+        await ws_manager.broadcast({
+            "event": "new_call",
+            "call_id": call_id,
+            "caller_name": intake.caller_name,
+            "urgency": intake.urgency
+        })
+    except Exception as e:
+        logger.warning(f"WebSocket broadcast skipped or unavailable: {e}")
+
+    # 4. Dispatch Email and SMS alerts concurrently
+    await asyncio.gather(
         send_email_notification(intake),
         send_sms_notification(intake),
         return_exceptions=True
     )
-    logger.info(f"Notifications dispatch completed. Results: {results}")

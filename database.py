@@ -1,11 +1,12 @@
 import sqlite3
 import datetime
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 from pydantic import BaseModel
 
 DB_PATH = Path(__file__).parent / "calls.db"
+
 
 class CallRecord(BaseModel):
     id: Optional[int] = None
@@ -25,28 +26,37 @@ class CallRecord(BaseModel):
     duration_seconds: Optional[int] = None
     transcript: Optional[str] = None
     ai_summary: Optional[str] = None
-    status: str = "new" # new, in_progress, called_back, archived
+    status: str = "new"  # new, in_progress, called_back, archived
     notes: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
 
+def get_db_connection() -> sqlite3.Connection:
+    """Creates a connection configured with WAL journal mode and busy timeout for high concurrency."""
+    conn = sqlite3.connect(DB_PATH, timeout=10.0, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db():
-    """Initializes the SQLite database with full schema, automatic migrations, and indexes."""
-    conn = sqlite3.connect(DB_PATH)
+    """Initializes database schema and executes auto-migrations for schema additions."""
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS call_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        call_id TEXT UNIQUE,
-        caller_name TEXT,
-        caller_phone TEXT,
+        call_id TEXT UNIQUE NOT NULL,
+        caller_name TEXT NOT NULL,
+        caller_phone TEXT NOT NULL,
         caller_email TEXT,
         company TEXT,
         department TEXT DEFAULT 'General',
-        reason TEXT,
-        details TEXT,
-        urgency TEXT,
+        reason TEXT NOT NULL,
+        details TEXT NOT NULL,
+        urgency TEXT DEFAULT 'medium',
         sentiment TEXT DEFAULT 'neutral',
         action_items TEXT,
         tags TEXT,
@@ -58,14 +68,14 @@ def init_db():
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+    );
     """)
 
-    # Automatic column migrations for existing databases
-    cursor.execute("PRAGMA table_info(call_records)")
-    columns = [col[1] for col in cursor.fetchall()]
+    # Auto-migration for new schema columns
+    cursor.execute("PRAGMA table_info(call_records);")
+    existing_cols = [col["name"] for col in cursor.fetchall()]
 
-    new_columns = {
+    migrations = {
         "caller_email": "TEXT",
         "department": "TEXT DEFAULT 'General'",
         "sentiment": "TEXT DEFAULT 'neutral'",
@@ -73,24 +83,46 @@ def init_db():
         "tags": "TEXT"
     }
 
-    for col_name, col_type in new_columns.items():
-        if col_name not in columns:
-            cursor.execute(f"ALTER TABLE call_records ADD COLUMN {col_name} {col_type}")
+    for col_name, col_type in migrations.items():
+        if col_name not in existing_cols:
+            cursor.execute(f"ALTER TABLE call_records ADD COLUMN {col_name} {col_type};")
 
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON call_records(status)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_urgency ON call_records(urgency)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_department ON call_records(department)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON call_records(created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON call_records(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_urgency ON call_records(urgency);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_department ON call_records(department);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON call_records(created_at);")
     conn.commit()
     conn.close()
 
 
+def _format_row(row: sqlite3.Row) -> Dict[str, Any]:
+    """Serializes database row into a dictionary with parsed JSON fields."""
+    d = dict(row)
+    if d.get("action_items"):
+        try:
+            d["action_items"] = json.loads(d["action_items"])
+        except Exception:
+            d["action_items"] = []
+    else:
+        d["action_items"] = []
+
+    if d.get("tags"):
+        try:
+            d["tags"] = json.loads(d["tags"])
+        except Exception:
+            d["tags"] = []
+    else:
+        d["tags"] = []
+
+    return d
+
+
 def save_call_record(record: CallRecord) -> int:
-    """Inserts or updates a call record."""
+    """Inserts a new call or updates existing record on conflict, returning the row id."""
     init_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     now = datetime.datetime.utcnow().isoformat()
     action_items_json = json.dumps(record.action_items) if record.action_items else None
     tags_json = json.dumps(record.tags) if record.tags else None
@@ -118,7 +150,7 @@ def save_call_record(record: CallRecord) -> int:
         duration_seconds=excluded.duration_seconds,
         transcript=excluded.transcript,
         ai_summary=excluded.ai_summary,
-        updated_at=excluded.updated_at
+        updated_at=excluded.updated_at;
     """, (
         record.call_id, record.caller_name, record.caller_phone, record.caller_email,
         record.company, record.department, record.reason, record.details, record.urgency,
@@ -126,67 +158,125 @@ def save_call_record(record: CallRecord) -> int:
         record.duration_seconds, record.transcript, record.ai_summary,
         record.status, record.notes, now, now
     ))
-    record_id = cursor.lastrowid
+    conn.commit()
+
+    # Always reliably fetch the row ID
+    cursor.execute("SELECT id FROM call_records WHERE call_id = ?;", (record.call_id,))
+    row = cursor.fetchone()
+    row_id = row["id"] if row else cursor.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_record_by_id(record_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieves a single record by primary key."""
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM call_records WHERE id = ?;", (record_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return _format_row(row) if row else None
+
+
+def get_record_by_call_id(call_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a single record by unique call identifier."""
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM call_records WHERE call_id = ?;", (call_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return _format_row(row) if row else None
+
+
+def delete_call_record(record_id: int) -> bool:
+    """Deletes a call record by primary key."""
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM call_records WHERE id = ?;", (record_id,))
+    deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
-    return record_id
+    return deleted
 
 
-def get_all_records(limit: int = 100, status: Optional[str] = None, search: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieves records ordered by most recent first, with optional status and text search."""
+def get_all_records(
+    limit: int = 100,
+    offset: int = 0,
+    status: Optional[str] = None,
+    department: Optional[str] = None,
+    urgency: Optional[str] = None,
+    search: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Retrieves paginated call records with filtering and text search."""
     init_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     query = "SELECT * FROM call_records WHERE 1=1"
     params = []
 
-    if status and status != "all":
+    if status and status.lower() != "all":
         query += " AND status = ?"
-        params.append(status)
+        params.append(status.lower())
 
-    if search:
-        search_param = f"%{search.strip()}%"
-        query += " AND (caller_name LIKE ? OR caller_phone LIKE ? OR company LIKE ? OR reason LIKE ? OR details LIKE ? OR transcript LIKE ?)"
-        params.extend([search_param] * 6)
+    if department and department.lower() != "all":
+        query += " AND department = ?"
+        params.append(department)
 
-    query += " ORDER BY created_at DESC LIMIT ?"
-    params.append(limit)
+    if urgency and urgency.lower() != "all":
+        query += " AND urgency = ?"
+        params.append(urgency.lower())
+
+    if search and search.strip():
+        sanitized_search = f"%{search.strip()}%"
+        query += """ AND (
+            caller_name LIKE ? OR 
+            caller_phone LIKE ? OR 
+            caller_email LIKE ? OR 
+            company LIKE ? OR 
+            reason LIKE ? OR 
+            details LIKE ? OR 
+            transcript LIKE ? OR 
+            notes LIKE ?
+        )"""
+        params.extend([sanitized_search] * 8)
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?;"
+    params.extend([limit, offset])
 
     cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
-    results = []
-    for row in rows:
-        d = dict(row)
-        if d.get("action_items"):
-            try:
-                d["action_items"] = json.loads(d["action_items"])
-            except Exception:
-                d["action_items"] = []
-        if d.get("tags"):
-            try:
-                d["tags"] = json.loads(d["tags"])
-            except Exception:
-                d["tags"] = []
-        results.append(d)
-
+    results = [_format_row(row) for row in rows]
     conn.close()
     return results
 
 
 def update_call_status(record_id: int, new_status: str, notes: Optional[str] = None) -> bool:
-    """Updates status and staff notes."""
+    """Updates the status and staff notes for a specific call record."""
     init_db()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.datetime.utcnow().isoformat()
-    
+
+    valid_statuses = ("new", "in_progress", "called_back", "archived")
+    if new_status.lower() not in valid_statuses:
+        conn.close()
+        raise ValueError(f"Invalid status '{new_status}'. Allowed: {valid_statuses}")
+
     if notes is not None:
-        cursor.execute("UPDATE call_records SET status = ?, notes = ?, updated_at = ? WHERE id = ?", (new_status, notes, now, record_id))
+        cursor.execute(
+            "UPDATE call_records SET status = ?, notes = ?, updated_at = ? WHERE id = ?;",
+            (new_status.lower(), notes, now, record_id)
+        )
     else:
-        cursor.execute("UPDATE call_records SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, record_id))
-        
+        cursor.execute(
+            "UPDATE call_records SET status = ?, updated_at = ? WHERE id = ?;",
+            (new_status.lower(), now, record_id)
+        )
+
     updated = cursor.rowcount > 0
     conn.commit()
     conn.close()
@@ -194,37 +284,33 @@ def update_call_status(record_id: int, new_status: str, notes: Optional[str] = N
 
 
 def get_analytics_metrics() -> Dict[str, Any]:
-    """Computes high-level analytics for dashboard charts."""
+    """Calculates comprehensive real-time intake metrics and breakdowns."""
     init_db()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) as count FROM call_records")
+    cursor.execute("SELECT COUNT(*) as count FROM call_records;")
     total_calls = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE status = 'new'")
+    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE status = 'new';")
     pending_callbacks = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE status = 'called_back'")
+    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE status = 'called_back';")
     called_back = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE urgency IN ('high', 'emergency') AND status != 'called_back'")
+    cursor.execute("SELECT COUNT(*) as count FROM call_records WHERE urgency IN ('high', 'emergency') AND status != 'called_back';")
     urgent_pending = cursor.fetchone()["count"]
 
-    cursor.execute("SELECT AVG(duration_seconds) as avg_duration FROM call_records WHERE duration_seconds IS NOT NULL")
+    cursor.execute("SELECT AVG(duration_seconds) as avg_duration FROM call_records WHERE duration_seconds IS NOT NULL AND duration_seconds > 0;")
     avg_dur = cursor.fetchone()["avg_duration"] or 0
 
-    # Urgency breakdown
-    cursor.execute("SELECT urgency, COUNT(*) as count FROM call_records GROUP BY urgency")
+    cursor.execute("SELECT urgency, COUNT(*) as count FROM call_records GROUP BY urgency;")
     urgency_counts = {r["urgency"]: r["count"] for r in cursor.fetchall()}
 
-    # Department breakdown
-    cursor.execute("SELECT department, COUNT(*) as count FROM call_records GROUP BY department")
+    cursor.execute("SELECT department, COUNT(*) as count FROM call_records GROUP BY department;")
     department_counts = {r["department"]: r["count"] for r in cursor.fetchall()}
 
-    # Sentiment breakdown
-    cursor.execute("SELECT sentiment, COUNT(*) as count FROM call_records GROUP BY sentiment")
+    cursor.execute("SELECT sentiment, COUNT(*) as count FROM call_records GROUP BY sentiment;")
     sentiment_counts = {r["sentiment"]: r["count"] for r in cursor.fetchall()}
 
     conn.close()
@@ -233,7 +319,7 @@ def get_analytics_metrics() -> Dict[str, Any]:
         "pending_callbacks": pending_callbacks,
         "called_back": called_back,
         "urgent_pending": urgent_pending,
-        "avg_duration_seconds": int(avg_dur),
+        "avg_duration_seconds": int(round(avg_dur)),
         "urgency_distribution": urgency_counts,
         "department_distribution": department_counts,
         "sentiment_distribution": sentiment_counts

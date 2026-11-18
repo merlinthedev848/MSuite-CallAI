@@ -21,8 +21,6 @@ from notifications import CallerIntake, dispatch_all_notifications
 from knowledge_base import knowledge_base
 from yeastar_client import yeastar_client
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("phone_agent")
 
 
@@ -68,7 +66,7 @@ Your mission is to answer incoming telephone calls warmly, answer common questio
 
 ### Persona & Style:
 - Warm, articulate, concise, and calm.
-- Speak naturally in short, friendly sentences. Avoid long paragraphs or bulleted lists because the caller is listening over a phone line.
+- Speak naturally in short, friendly sentences. Avoid long paragraphs or bulleted lists because the caller is listening over a telephone line.
 - Always ask only one question at a time so the caller is never overwhelmed.
 
 ### Key Objectives during the Phone Call:
@@ -96,7 +94,7 @@ Your mission is to answer incoming telephone calls warmly, answer common questio
 """
 
 
-def create_tools(intake: CallerIntake, session_holder: list) -> list:
+def create_tools(intake: CallerIntake) -> list:
     """Creates callable tools bound to the current call's intake record."""
 
     @llm.function_tool(description="Record or update the caller's identity and contact information.")
@@ -113,7 +111,7 @@ def create_tools(intake: CallerIntake, session_holder: list) -> list:
         if company:
             intake.company = company
         logger.info(f"Recorded identity: {caller_name} | {callback_phone} | {caller_email} | {company}")
-        return f"Saved caller details for {caller_name} ({callback_phone})."
+        return f"Saved contact details for {caller_name} ({callback_phone})."
 
     @llm.function_tool(description="Record detailed notes about why the caller is reaching out.")
     def record_inquiry_details(
@@ -149,31 +147,43 @@ def create_tools(intake: CallerIntake, session_holder: list) -> list:
         if not ext.isdigit():
             ext = knowledge_base.get_department_extension(department_or_extension)
             
-        logger.info(f"Transfer initiated to extension {ext}. Reason: {reason}")
-        
-        # Check Yeastar extension status
+        logger.info(f"Live transfer requested to extension {ext}. Reason: {reason}")
+        intake.details += f" [Caller requested transfer to ext {ext}: {reason}]"
+
         status_info = await yeastar_client.get_extension_status(ext)
         logger.info(f"Yeastar extension {ext} status: {status_info.get('status')}")
 
-        return f"Please hold for a moment while I transfer you to extension {ext}."
+        return f"Please hold while I transfer you to extension {ext}."
 
     return [record_caller_identity, record_inquiry_details, search_knowledge_base, transfer_call_to_staff]
 
 
 async def entrypoint(ctx: JobContext):
-    logger.info(f"Connecting to room: {ctx.room.name}")
+    logger.info(f"Connecting voice worker to room: {ctx.room.name}")
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    # Initialize caller intake container
     intake = CallerIntake(call_id=ctx.room.name)
     start_time = time.time()
 
-    # Wait for the caller participant to connect
-    participant = await ctx.wait_for_participant()
-    logger.info(f"Caller connected: identity={participant.identity}, name={participant.name}")
+    # Handle race condition: check if participant already connected before listener
+    participant = next(iter(ctx.room.remote_participants.values()), None)
+    if not participant:
+        try:
+            participant = await asyncio.wait_for(ctx.wait_for_participant(), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"No participant joined room {ctx.room.name} within 30s. Exiting.")
+            return
 
-    if participant.identity and participant.identity.startswith("+"):
+    logger.info(f"Participant connected: identity={participant.identity}, name={participant.name}")
+
+    # Extract SIP caller ID and metadata if present
+    if participant.identity and (participant.identity.startswith("+") or participant.identity.isdigit()):
         intake.caller_phone = participant.identity
+
+    if hasattr(participant, "attributes") and participant.attributes:
+        sip_phone = participant.attributes.get("sip.phoneNumber")
+        if sip_phone:
+            intake.caller_phone = sip_phone
 
     # Initialize AI Components
     llm_instance = get_llm()
@@ -181,8 +191,7 @@ async def entrypoint(ctx: JobContext):
     tts_instance = get_tts()
     vad_instance = silero.VAD.load()
 
-    session_holder = []
-    tools = create_tools(intake, session_holder)
+    tools = create_tools(intake)
 
     agent = Agent(
         instructions=build_system_prompt(),
@@ -194,23 +203,25 @@ async def entrypoint(ctx: JobContext):
         llm=llm_instance,
         tts=tts_instance,
         vad=vad_instance,
-        user_away_timeout=25.0, # Silence detection
+        user_away_timeout=25.0,
     )
-    session_holder.append(session)
 
     # Start voice session in the room
     session.start(agent, room=ctx.room)
 
-    # Greet the caller
-    await session.say(
-        f"Thank you for calling {config.company_name}. My name is your virtual assistant. How may I help you today?"
-    )
+    # Greet the caller safely
+    try:
+        await session.say(
+            f"Thank you for calling {config.company_name}. My name is your virtual assistant. How may I help you today?"
+        )
+    except Exception as e:
+        logger.warning(f"Greeting could not be delivered (caller disconnected early): {e}")
 
     async def handle_call_ended():
         duration = int(time.time() - start_time)
         intake.call_duration_seconds = duration
 
-        # Extract full transcript reliably from session history
+        # Extract full conversation transcript reliably
         try:
             transcript_lines = []
             if hasattr(session, "history"):

@@ -10,30 +10,33 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-blue-600 selection:text-white">
     <!-- Header -->
-    <header class="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur sticky top-0 z-30 shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 py-3.5 flex flex-wrap justify-between items-center gap-4">
+    <header class="border-b border-slate-800/80 bg-slate-900/95 backdrop-blur sticky top-0 z-30 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
             <div class="flex items-center gap-3.5">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
                     <i class="fa-solid fa-headset text-lg"></i>
                 </div>
                 <div>
                     <div class="flex items-center gap-2">
-                        <h1 class="text-lg font-bold tracking-tight text-white">{{COMPANY_NAME}}</h1>
+                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">{{COMPANY_NAME}}</h1>
                         <span id="ws-badge" class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Live Sync
                         </span>
                     </div>
-                    <p class="text-xs text-slate-400">AI Phone Receptionist & Yeastar S100 Dispatch</p>
+                    <p class="text-[11px] text-slate-400">AI Phone Receptionist & Yeastar S100 Telephony Hub</p>
                 </div>
             </div>
-            <div class="flex items-center gap-2.5">
-                <button onclick="toggleAnalytics()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-2 transition">
+            <div class="flex items-center gap-2">
+                <button onclick="toggleAnalytics()" id="btn-toggle-analytics" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition">
                     <i class="fa-solid fa-chart-pie text-indigo-400"></i> Analytics
                 </button>
-                <a href="/api/export/csv" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-2 transition">
-                    <i class="fa-solid fa-file-csv text-emerald-400"></i> Export CSV
+                <button onclick="openKnowledgeModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-book text-amber-400"></i> FAQ & Routing
+                </button>
+                <a href="/api/export/csv" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-file-csv text-emerald-400"></i> Export
                 </a>
-                <button onclick="loadDashboard()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-md transition flex items-center gap-1.5">
+                <button onclick="loadDashboard()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow transition flex items-center gap-1.5">
                     <i class="fa-solid fa-rotate-right"></i> Refresh
                 </button>
             </div>
@@ -42,66 +45,66 @@
 
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 py-6">
-        <!-- Analytics Drawer (Collapsible) -->
-        <div id="analytics-panel" class="hidden mb-8 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-base font-bold text-white flex items-center gap-2">
-                    <i class="fa-solid fa-chart-line text-blue-400"></i> Call Intake Analytics & Intelligence
+        <!-- Analytics Panel (Collapsible) -->
+        <div id="analytics-panel" class="hidden mb-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl transition-all">
+            <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-800">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-chart-line text-blue-400"></i> Call Intake Analytics & Real-Time Metrics
                 </h3>
                 <button onclick="toggleAnalytics()" class="text-slate-400 hover:text-white text-sm">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs font-bold uppercase text-slate-400 mb-3">Urgency Breakdown</p>
-                    <div class="h-48 flex items-center justify-center">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div class="bg-slate-950/70 p-4 rounded-xl border border-slate-800">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Urgency Breakdown</p>
+                    <div class="h-44 flex items-center justify-center">
                         <canvas id="urgencyChart"></canvas>
                     </div>
                 </div>
-                <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs font-bold uppercase text-slate-400 mb-3">Department Routing</p>
-                    <div class="h-48 flex items-center justify-center">
+                <div class="bg-slate-950/70 p-4 rounded-xl border border-slate-800">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Department Distribution</p>
+                    <div class="h-44 flex items-center justify-center">
                         <canvas id="deptChart"></canvas>
                     </div>
                 </div>
-                <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs font-bold uppercase text-slate-400 mb-3">Caller Sentiment (Ollama)</p>
-                    <div class="h-48 flex items-center justify-center">
+                <div class="bg-slate-950/70 p-4 rounded-xl border border-slate-800">
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Sentiment Evaluation (Ollama)</p>
+                    <div class="h-44 flex items-center justify-center">
                         <canvas id="sentimentChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Stats Overview Cards -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 mb-6">
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+        <!-- Metric KPI Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-6">
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
                 <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Calls Logged</p>
-                <p id="stat-total" class="text-2xl font-black text-white mt-1.5">-</p>
+                <p id="stat-total" class="text-2xl font-black text-white mt-1">-</p>
             </div>
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
                 <p class="text-[11px] font-bold uppercase tracking-wider text-amber-400">Pending Callbacks</p>
-                <p id="stat-pending" class="text-2xl font-black text-amber-300 mt-1.5">-</p>
+                <p id="stat-pending" class="text-2xl font-black text-amber-300 mt-1">-</p>
             </div>
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
                 <p class="text-[11px] font-bold uppercase tracking-wider text-rose-400">Urgent Inquiries</p>
-                <p id="stat-urgent" class="text-2xl font-black text-rose-400 mt-1.5">-</p>
+                <p id="stat-urgent" class="text-2xl font-black text-rose-400 mt-1">-</p>
             </div>
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
-                <p class="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Completed Callbacks</p>
-                <p id="stat-completed" class="text-2xl font-black text-emerald-300 mt-1.5">-</p>
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
+                <p class="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Resolved Callbacks</p>
+                <p id="stat-completed" class="text-2xl font-black text-emerald-300 mt-1">-</p>
             </div>
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
+            <div class="col-span-2 sm:col-span-1 bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
                 <p class="text-[11px] font-bold uppercase tracking-wider text-blue-400">Avg Call Duration</p>
-                <p id="stat-duration" class="text-2xl font-black text-blue-300 mt-1.5">-</p>
+                <p id="stat-duration" class="text-2xl font-black text-blue-300 mt-1">-</p>
             </div>
         </div>
 
-        <!-- Controls & Search -->
-        <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+        <!-- Filters & Search Toolbar -->
+        <div class="flex flex-wrap items-center justify-between gap-3.5 mb-5 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
             <!-- Filter Tabs -->
-            <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+            <div class="flex items-center gap-1 text-xs">
                 <button onclick="setFilter('all')" id="btn-all" class="px-3 py-1.5 rounded-lg font-semibold text-white bg-blue-600 transition">All</button>
                 <button onclick="setFilter('new')" id="btn-new" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition">New</button>
                 <button onclick="setFilter('in_progress')" id="btn-in_progress" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition">In Progress</button>
@@ -109,11 +112,30 @@
                 <button onclick="setFilter('archived')" id="btn-archived" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition">Archived</button>
             </div>
 
-            <!-- Search Bar -->
-            <div class="relative w-full sm:w-72">
-                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                <input type="text" id="search-input" oninput="debounceSearch()" placeholder="Search caller, notes, transcript..."
-                    class="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition" />
+            <!-- Department & Urgency Dropdowns -->
+            <div class="flex items-center gap-2 flex-wrap">
+                <select id="filter-dept" onchange="loadDashboard()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
+                    <option value="">All Departments</option>
+                    <option value="Technical Support">Technical Support</option>
+                    <option value="Sales & Billing">Sales & Billing</option>
+                    <option value="Emergency Dispatch">Emergency Dispatch</option>
+                    <option value="General">General</option>
+                </select>
+
+                <select id="filter-urgency" onchange="loadDashboard()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
+                    <option value="">All Urgency</option>
+                    <option value="emergency">Emergency</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+
+                <!-- Search Input -->
+                <div class="relative w-48 sm:w-64">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                    <input type="text" id="search-input" oninput="debounceSearch()" placeholder="Search caller, notes, transcript..."
+                        class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition" />
+                </div>
             </div>
         </div>
 
@@ -122,15 +144,15 @@
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
-                        <tr class="bg-slate-950/60 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-800">
-                            <th class="p-4">Time</th>
-                            <th class="p-4">Caller & Company</th>
-                            <th class="p-4">Contact</th>
-                            <th class="p-4">Inquiry & Summary</th>
-                            <th class="p-4">Department</th>
-                            <th class="p-4">Urgency</th>
-                            <th class="p-4">Status</th>
-                            <th class="p-4 text-right">Actions</th>
+                        <tr class="bg-slate-950/70 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-800">
+                            <th class="p-3.5">Time</th>
+                            <th class="p-3.5">Caller & Company</th>
+                            <th class="p-3.5">Contact</th>
+                            <th class="p-3.5">Inquiry & Summary</th>
+                            <th class="p-3.5">Department</th>
+                            <th class="p-3.5">Urgency</th>
+                            <th class="p-3.5">Status</th>
+                            <th class="p-3.5 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="calls-tbody" class="divide-y divide-slate-800/80 text-xs">
@@ -166,22 +188,22 @@
                     <p id="modal-summary" class="leading-relaxed"></p>
                 </div>
 
-                <!-- Action Items -->
+                <!-- Action Items Checklist -->
                 <div id="modal-action-items-container" class="hidden bg-amber-950/20 border border-amber-800/30 rounded-xl p-3.5 text-amber-200">
                     <p class="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">Recommended Next Steps for Staff:</p>
                     <ul id="modal-action-items" class="list-disc pl-4 space-y-1"></ul>
                 </div>
 
-                <!-- Transcript -->
+                <!-- Full Transcript -->
                 <div>
                     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Full Conversation Transcript:</p>
-                    <div id="modal-transcript" class="bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-[11px] text-slate-300 max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed"></div>
+                    <div id="modal-transcript" class="bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-[11px] text-slate-300 max-h-52 overflow-y-auto whitespace-pre-wrap leading-relaxed"></div>
                 </div>
 
-                <!-- Staff Notes -->
+                <!-- Staff Internal Notes -->
                 <div>
-                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Staff Internal Notes:</p>
-                    <textarea id="modal-notes" rows="2" placeholder="Add follow-up notes or assignment details..."
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Staff Internal Notes & Follow-up History:</p>
+                    <textarea id="modal-notes" rows="2" placeholder="Add follow-up notes, assigned technician, or resolution details..."
                         class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"></textarea>
                 </div>
             </div>
@@ -191,6 +213,37 @@
                     Save Notes
                 </button>
                 <button onclick="closeModal()" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Knowledge Base & Routing Modal -->
+    <div id="knowledge-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+            <button onclick="closeKnowledgeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-base">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-9 h-9 rounded-xl bg-amber-600/20 text-amber-400 flex items-center justify-center">
+                    <i class="fa-solid fa-book text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">Company Knowledge Base & Extensions</h3>
+                    <p class="text-xs text-slate-400">Configure questions the AI agent can answer and PBX transfer extensions</p>
+                </div>
+            </div>
+
+            <div class="overflow-y-auto flex-1">
+                <textarea id="knowledge-json-editor" rows="14" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-amber-500 transition leading-relaxed"></textarea>
+            </div>
+
+            <div class="mt-5 pt-3 border-t border-slate-800 flex justify-between items-center">
+                <button onclick="saveKnowledgeBase()" class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition">
+                    Save Knowledge Base
+                </button>
+                <button onclick="closeKnowledgeModal()" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition">
                     Close
                 </button>
             </div>
@@ -228,7 +281,9 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    showToast('Update: ' + (data.event || 'New call received'));
+                    if (data.event === 'new_call') {
+                        showToast(`New call received from ${data.caller_name || 'Caller'}`);
+                    }
                     loadDashboard();
                 } catch (e) {}
             };
@@ -242,6 +297,10 @@
         async function loadDashboard() {
             try {
                 let url = '/api/calls?status=' + currentFilter;
+                const dept = document.getElementById('filter-dept').value;
+                const urgency = document.getElementById('filter-urgency').value;
+                if (dept) url += '&department=' + encodeURIComponent(dept);
+                if (urgency) url += '&urgency=' + encodeURIComponent(urgency);
                 if (searchQuery) url += '&search=' + encodeURIComponent(searchQuery);
 
                 const [callsRes, statsRes] = await Promise.all([
@@ -267,7 +326,9 @@
         function setFilter(filter) {
             currentFilter = filter;
             document.querySelectorAll('[id^="btn-"]').forEach(btn => {
-                btn.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition';
+                if (btn.id.startsWith('btn-') && !btn.id.includes('analytics')) {
+                    btn.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition';
+                }
             });
             document.getElementById('btn-' + filter).className = 'px-3 py-1.5 rounded-lg font-semibold text-white bg-blue-600 transition';
             loadDashboard();
@@ -307,37 +368,37 @@
 
                 return `
                 <tr class="hover:bg-slate-900/60 transition">
-                    <td class="p-4 text-slate-400 whitespace-nowrap">${dateStr}</td>
-                    <td class="p-4 font-semibold text-white">
+                    <td class="p-3.5 text-slate-400 whitespace-nowrap">${dateStr}</td>
+                    <td class="p-3.5 font-semibold text-white">
                         ${c.caller_name}
                         ${c.company ? `<span class="block text-[11px] font-normal text-slate-400">${c.company}</span>` : ''}
                     </td>
-                    <td class="p-4 whitespace-nowrap">
-                        <div class="flex items-center gap-2">
+                    <td class="p-3.5 whitespace-nowrap">
+                        <div class="flex items-center gap-1.5">
                             <a href="tel:${c.caller_phone}" class="text-blue-400 hover:text-blue-300 font-medium">
                                 ${c.caller_phone}
                             </a>
-                            <button onclick="clickToDial('${c.caller_phone}')" title="Dial from Yeastar Desk Phone" class="p-1 rounded bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-[10px]">
+                            <button onclick="clickToDial('${c.caller_phone}')" title="Dial via Yeastar S100 Desk Phone" class="px-1.5 py-0.5 rounded bg-blue-600/15 hover:bg-blue-600/30 text-blue-400 text-[10px] font-bold border border-blue-500/20">
                                 <i class="fa-solid fa-phone-flip"></i> Yeastar
                             </button>
                         </div>
                         ${c.caller_email ? `<span class="block text-[10px] text-slate-400">${c.caller_email}</span>` : ''}
                         ${c.preferred_callback_time ? `<span class="block text-[10px] text-slate-400 mt-0.5"><i class="fa-regular fa-clock"></i> ${c.preferred_callback_time}</span>` : ''}
                     </td>
-                    <td class="p-4 max-w-xs">
+                    <td class="p-3.5 max-w-xs">
                         <span class="font-medium text-slate-200 block truncate">${c.reason}</span>
                         <span class="text-slate-400 block truncate text-[11px]">${c.ai_summary || c.details}</span>
                     </td>
-                    <td class="p-4 whitespace-nowrap text-slate-300">
+                    <td class="p-3.5 whitespace-nowrap text-slate-300">
                         ${c.department || 'General'}
                     </td>
-                    <td class="p-4 whitespace-nowrap">
+                    <td class="p-3.5 whitespace-nowrap">
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${urgencyClass}">${c.urgency}</span>
                     </td>
-                    <td class="p-4 whitespace-nowrap">
+                    <td class="p-3.5 whitespace-nowrap">
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${statusClass}">${(c.status || '').replace('_', ' ')}</span>
                     </td>
-                    <td class="p-4 text-right whitespace-nowrap">
+                    <td class="p-3.5 text-right whitespace-nowrap">
                         <div class="flex items-center justify-end gap-1.5">
                             <button onclick="showModal(${c.id})" class="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition" title="View Details">
                                 <i class="fa-regular fa-file-lines"></i>
@@ -350,6 +411,9 @@
                             <button onclick="updateStatus(${c.id}, 'archived')" class="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition" title="Archive">
                                 <i class="fa-solid fa-box-archive text-[11px]"></i>
                             </button>` : ''}
+                            <button onclick="deleteCall(${c.id})" class="p-1.5 hover:bg-rose-950/40 rounded-lg text-slate-500 hover:text-rose-400 transition" title="Delete Record">
+                                <i class="fa-regular fa-trash-can text-[11px]"></i>
+                            </button>
                         </div>
                     </td>
                 </tr>
@@ -428,6 +492,52 @@
                 loadDashboard();
             } catch (err) {
                 alert('Failed to update status');
+            }
+        }
+
+        async function deleteCall(id) {
+            if (!confirm('Are you sure you want to permanently delete this call record?')) return;
+            try {
+                await fetch(`/api/calls/${id}`, {method: 'DELETE'});
+                showToast('Call record deleted.');
+                loadDashboard();
+            } catch (err) {
+                alert('Failed to delete call: ' + err);
+            }
+        }
+
+        async function openKnowledgeModal() {
+            try {
+                const res = await fetch('/api/knowledge');
+                const data = await res.json();
+                document.getElementById('knowledge-json-editor').value = JSON.stringify(data, null, 2);
+                document.getElementById('knowledge-modal').classList.remove('hidden');
+            } catch (err) {
+                alert('Failed to load knowledge base: ' + err);
+            }
+        }
+
+        function closeKnowledgeModal() {
+            document.getElementById('knowledge-modal').classList.add('hidden');
+        }
+
+        async function saveKnowledgeBase() {
+            try {
+                const raw = document.getElementById('knowledge-json-editor').value;
+                const parsed = JSON.parse(raw);
+                const res = await fetch('/api/knowledge', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(parsed)
+                });
+                if (res.ok) {
+                    showToast('Knowledge base updated!');
+                    closeKnowledgeModal();
+                } else {
+                    alert('Failed to save knowledge base.');
+                }
+            } catch (err) {
+                alert('Invalid JSON formatting: ' + err.message);
             }
         }
 
