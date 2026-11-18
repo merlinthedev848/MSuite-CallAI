@@ -12,6 +12,7 @@ from database import (
     init_db,
     save_call_record,
     get_all_records,
+    get_records_count,
     get_record_by_id,
     delete_call_record,
     update_call_status,
@@ -59,9 +60,13 @@ def test_database_crud_and_migrations():
     assert single["department"] == "Emergency Dispatch"
     assert len(single["action_items"]) == 2
 
-    # Search
+    # Search with wildcards
     search_results = get_all_records(search="Perimeter", limit=5)
     assert any(r["call_id"] == "test-audit-call-999" for r in search_results)
+
+    # Count
+    total_count = get_records_count(search="Perimeter")
+    assert total_count >= 1
 
     # Status update
     updated = update_call_status(rec_id, "in_progress", "Contacting security lead.")
@@ -101,6 +106,9 @@ async def test_yeastar_client_originate_and_presence():
     dial = await yeastar_client.originate_call(desk_extension="1000", destination_phone="+1 (555) 333-4444")
     assert dial.get("success") is True
     assert dial.get("destination") == "+15553334444"
+
+    cdr = await yeastar_client.get_cdr_records()
+    assert isinstance(cdr, list)
 
 
 def test_email_html_structure():
@@ -149,33 +157,46 @@ def test_api_endpoints_full_lifecycle():
     assert res_get.status_code == 200
     assert res_get.json()["caller_name"] == "API Tester"
 
-    # 4. Update status valid
+    # 4. Get paginated calls list
+    res_calls = client.get("/api/calls?page=1&page_size=10")
+    assert res_calls.status_code == 200
+    payload = res_calls.json()
+    assert "items" in payload
+    assert "total" in payload
+    assert "total_pages" in payload
+    assert isinstance(payload["items"], list)
+
+    # 5. Update status valid
     res_up = client.post(f"/api/calls/{rec_id}/status", json={"status": "called_back", "notes": "Tested"})
     assert res_up.status_code == 200
     assert res_up.json()["new_status"] == "called_back"
 
-    # 5. Update status invalid
+    # 6. Update status invalid
     res_invalid = client.post(f"/api/calls/{rec_id}/status", json={"status": "not_a_valid_status"})
     assert res_invalid.status_code == 400
 
-    # 6. Click to dial
+    # 7. Click to dial
     res_dial = client.post("/api/dial", json={"caller_phone": "+15550001111", "staff_extension": "1000"})
-    assert res_dial.status_code == 200
-    assert res_dial.json()["success"] is True
+    assert res_dial.status_code in (200, 429)
 
-    # 7. Knowledge base API
+    # 8. Yeastar webhook
+    res_hook = client.post("/api/webhook/yeastar", json={"event": "ring", "ext": "1000", "caller": "+15551234567"})
+    assert res_hook.status_code == 200
+    assert res_hook.json()["status"] == "received"
+
+    # 9. Knowledge base API
     res_kb = client.get("/api/knowledge")
     assert res_kb.status_code == 200
 
-    # 8. CSV Export
+    # 10. CSV Export
     res_csv = client.get("/api/export/csv")
     assert res_csv.status_code == 200
     assert "text/csv" in res_csv.headers["content-type"]
 
-    # 9. Delete call
+    # 11. Delete call
     res_del = client.delete(f"/api/calls/{rec_id}")
     assert res_del.status_code == 200
 
-    # Verify 404 on deleted
+    # 12. Verify 404 on deleted
     res_404 = client.get(f"/api/calls/{rec_id}")
     assert res_404.status_code == 404

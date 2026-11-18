@@ -2,25 +2,28 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (for audio codecs & networking)
+# Install system dependencies (audio codecs, networking, build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
+# Install uv package manager
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy project definition and install dependencies
+# Copy dependency specifications and install packages into system Python
 COPY pyproject.toml requirements.txt ./
 RUN uv pip install --system -r requirements.txt
 
-# Copy application source code
+# Copy application source code and scripts
 COPY . .
 
-# Expose web dashboard port
+# Ensure entrypoint script is executable
+RUN chmod +x /app/entrypoint.sh
+
+# Expose HTTP dashboard and WebSocket port
 EXPOSE 8000
 
-# Default command: run FastAPI dashboard and agent
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run both the web dashboard and voice agent worker cleanly
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,10 +1,12 @@
 import sqlite3
 import datetime
 import json
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 from pydantic import BaseModel
 
+logger = logging.getLogger("phone_agent.database")
 DB_PATH = Path(__file__).parent / "calls.db"
 
 
@@ -24,6 +26,7 @@ class CallRecord(BaseModel):
     tags: Optional[List[str]] = None
     preferred_callback_time: Optional[str] = None
     duration_seconds: Optional[int] = None
+    audio_url: Optional[str] = None
     transcript: Optional[str] = None
     ai_summary: Optional[str] = None
     status: str = "new"  # new, in_progress, called_back, archived
@@ -33,8 +36,8 @@ class CallRecord(BaseModel):
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Creates a connection configured with WAL journal mode and busy timeout for high concurrency."""
-    conn = sqlite3.connect(DB_PATH, timeout=10.0, check_same_thread=False)
+    """Creates a thread-safe connection configured with WAL journal mode and busy timeout."""
+    conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
     conn.row_factory = sqlite3.Row
@@ -62,6 +65,7 @@ def init_db():
         tags TEXT,
         preferred_callback_time TEXT,
         duration_seconds INTEGER,
+        audio_url TEXT,
         transcript TEXT,
         ai_summary TEXT,
         status TEXT DEFAULT 'new',
@@ -71,7 +75,7 @@ def init_db():
     );
     """)
 
-    # Auto-migration for new schema columns
+    # Auto-migration for schema enhancements
     cursor.execute("PRAGMA table_info(call_records);")
     existing_cols = [col["name"] for col in cursor.fetchall()]
 
@@ -80,7 +84,8 @@ def init_db():
         "department": "TEXT DEFAULT 'General'",
         "sentiment": "TEXT DEFAULT 'neutral'",
         "action_items": "TEXT",
-        "tags": "TEXT"
+        "tags": "TEXT",
+        "audio_url": "TEXT"
     }
 
     for col_name, col_type in migrations.items():
@@ -131,9 +136,9 @@ def save_call_record(record: CallRecord) -> int:
     INSERT INTO call_records (
         call_id, caller_name, caller_phone, caller_email, company, department,
         reason, details, urgency, sentiment, action_items, tags,
-        preferred_callback_time, duration_seconds, transcript,
+        preferred_callback_time, duration_seconds, audio_url, transcript,
         ai_summary, status, notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(call_id) DO UPDATE SET
         caller_name=excluded.caller_name,
         caller_phone=excluded.caller_phone,
@@ -148,6 +153,7 @@ def save_call_record(record: CallRecord) -> int:
         tags=excluded.tags,
         preferred_callback_time=excluded.preferred_callback_time,
         duration_seconds=excluded.duration_seconds,
+        audio_url=coalesce(excluded.audio_url, call_records.audio_url),
         transcript=excluded.transcript,
         ai_summary=excluded.ai_summary,
         updated_at=excluded.updated_at;
@@ -155,12 +161,11 @@ def save_call_record(record: CallRecord) -> int:
         record.call_id, record.caller_name, record.caller_phone, record.caller_email,
         record.company, record.department, record.reason, record.details, record.urgency,
         record.sentiment, action_items_json, tags_json, record.preferred_callback_time,
-        record.duration_seconds, record.transcript, record.ai_summary,
+        record.duration_seconds, record.audio_url, record.transcript, record.ai_summary,
         record.status, record.notes, now, now
     ))
     conn.commit()
 
-    # Always reliably fetch the row ID
     cursor.execute("SELECT id FROM call_records WHERE call_id = ?;", (record.call_id,))
     row = cursor.fetchone()
     row_id = row["id"] if row else cursor.lastrowid
@@ -202,6 +207,70 @@ def delete_call_record(record_id: int) -> bool:
     return deleted
 
 
+def _build_filter_query(
+    status: Optional[str] = None,
+    department: Optional[str] = None,
+    urgency: Optional[str] = None,
+    search: Optional[str] = None
+) -> Tuple[str, List[Any]]:
+    """Builds parameterized WHERE clauses with escaped LIKE wildcards."""
+    where_clauses = ["1=1"]
+    params = []
+
+    if status and status.lower() != "all":
+        where_clauses.append("status = ?")
+        params.append(status.lower())
+
+    if department and department.lower() != "all":
+        where_clauses.append("department = ?")
+        params.append(department)
+
+    if urgency and urgency.lower() != "all":
+        where_clauses.append("urgency = ?")
+        params.append(urgency.lower())
+
+    if search and search.strip():
+        # Escape wildcards for safe LIKE query
+        clean_search = (
+            search.strip()
+            .replace("/", "//")
+            .replace("%", "/%")
+            .replace("_", "/_")
+        )
+        like_pattern = f"%{clean_search}%"
+        where_clauses.append("""(
+            caller_name LIKE ? ESCAPE '/' OR 
+            caller_phone LIKE ? ESCAPE '/' OR 
+            caller_email LIKE ? ESCAPE '/' OR 
+            company LIKE ? ESCAPE '/' OR 
+            reason LIKE ? ESCAPE '/' OR 
+            details LIKE ? ESCAPE '/' OR 
+            transcript LIKE ? ESCAPE '/' OR 
+            notes LIKE ? ESCAPE '/'
+        )""")
+        params.extend([like_pattern] * 8)
+
+    return " AND ".join(where_clauses), params
+
+
+def get_records_count(
+    status: Optional[str] = None,
+    department: Optional[str] = None,
+    urgency: Optional[str] = None,
+    search: Optional[str] = None
+) -> int:
+    """Calculates total matching records for accurate pagination."""
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    where_sql, params = _build_filter_query(status, department, urgency, search)
+    query = f"SELECT COUNT(*) as total FROM call_records WHERE {where_sql};"
+    cursor.execute(query, tuple(params))
+    count = cursor.fetchone()["total"]
+    conn.close()
+    return count
+
+
 def get_all_records(
     limit: int = 100,
     offset: int = 0,
@@ -215,36 +284,8 @@ def get_all_records(
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    query = "SELECT * FROM call_records WHERE 1=1"
-    params = []
-
-    if status and status.lower() != "all":
-        query += " AND status = ?"
-        params.append(status.lower())
-
-    if department and department.lower() != "all":
-        query += " AND department = ?"
-        params.append(department)
-
-    if urgency and urgency.lower() != "all":
-        query += " AND urgency = ?"
-        params.append(urgency.lower())
-
-    if search and search.strip():
-        sanitized_search = f"%{search.strip()}%"
-        query += """ AND (
-            caller_name LIKE ? OR 
-            caller_phone LIKE ? OR 
-            caller_email LIKE ? OR 
-            company LIKE ? OR 
-            reason LIKE ? OR 
-            details LIKE ? OR 
-            transcript LIKE ? OR 
-            notes LIKE ?
-        )"""
-        params.extend([sanitized_search] * 8)
-
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?;"
+    where_sql, params = _build_filter_query(status, department, urgency, search)
+    query = f"SELECT * FROM call_records WHERE {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?;"
     params.extend([limit, offset])
 
     cursor.execute(query, tuple(params))

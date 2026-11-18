@@ -102,7 +102,7 @@
         </div>
 
         <!-- Filters & Search Toolbar -->
-        <div class="flex flex-wrap items-center justify-between gap-3.5 mb-5 bg-slate-900/60 p-2 rounded-2xl border border-slate-800">
+        <div class="flex flex-wrap items-center justify-between gap-3.5 mb-5 bg-slate-900/60 p-2.5 rounded-2xl border border-slate-800">
             <!-- Filter Tabs -->
             <div class="flex items-center gap-1 text-xs">
                 <button onclick="setFilter('all')" id="btn-all" class="px-3 py-1.5 rounded-lg font-semibold text-white bg-blue-600 transition">All</button>
@@ -112,9 +112,9 @@
                 <button onclick="setFilter('archived')" id="btn-archived" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition">Archived</button>
             </div>
 
-            <!-- Department & Urgency Dropdowns -->
+            <!-- Department & Urgency Dropdowns & Search -->
             <div class="flex items-center gap-2 flex-wrap">
-                <select id="filter-dept" onchange="loadDashboard()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
+                <select id="filter-dept" onchange="resetPageAndLoad()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
                     <option value="">All Departments</option>
                     <option value="Technical Support">Technical Support</option>
                     <option value="Sales & Billing">Sales & Billing</option>
@@ -122,7 +122,7 @@
                     <option value="General">General</option>
                 </select>
 
-                <select id="filter-urgency" onchange="loadDashboard()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
+                <select id="filter-urgency" onchange="resetPageAndLoad()" class="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
                     <option value="">All Urgency</option>
                     <option value="emergency">Emergency</option>
                     <option value="high">High</option>
@@ -130,12 +130,15 @@
                     <option value="low">Low</option>
                 </select>
 
-                <!-- Search Input -->
-                <div class="relative w-48 sm:w-64">
+                <div class="relative w-44 sm:w-56">
                     <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                    <input type="text" id="search-input" oninput="debounceSearch()" placeholder="Search caller, notes, transcript..."
+                    <input type="text" id="search-input" oninput="debounceSearch()" placeholder="Search calls..."
                         class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition" />
                 </div>
+
+                <button onclick="clearAllFilters()" title="Reset All Filters" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs transition">
+                    <i class="fa-solid fa-filter-circle-xmark"></i>
+                </button>
             </div>
         </div>
 
@@ -162,6 +165,20 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Pagination Bar -->
+            <div class="p-3.5 bg-slate-950/60 border-t border-slate-800 flex flex-wrap justify-between items-center gap-3 text-xs text-slate-400">
+                <div id="pagination-info">Showing calls...</div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-prev-page" onclick="changePage(-1)" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none rounded-lg font-medium text-slate-200 transition">
+                        <i class="fa-solid fa-chevron-left mr-1"></i> Prev
+                    </button>
+                    <span id="page-indicator" class="font-bold text-white px-2">Page 1</span>
+                    <button id="btn-next-page" onclick="changePage(1)" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none rounded-lg font-medium text-slate-200 transition">
+                        Next <i class="fa-solid fa-chevron-right ml-1"></i>
+                    </button>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -182,6 +199,14 @@
             </div>
 
             <div class="overflow-y-auto pr-1 space-y-4 text-xs">
+                <!-- Audio Player (if recorded) -->
+                <div id="modal-audio-container" class="hidden bg-slate-950 border border-slate-800 rounded-xl p-3">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
+                        <i class="fa-solid fa-play text-blue-400"></i> Call Audio Recording:
+                    </p>
+                    <audio id="modal-audio-player" controls class="w-full h-8"></audio>
+                </div>
+
                 <!-- AI Summary -->
                 <div id="modal-summary-container" class="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3.5 text-blue-200">
                     <p class="text-[10px] font-bold uppercase tracking-wider text-blue-400 mb-1">Executive Summary (Ollama):</p>
@@ -231,7 +256,7 @@
                 </div>
                 <div>
                     <h3 class="text-base font-bold text-white">Company Knowledge Base & Extensions</h3>
-                    <p class="text-xs text-slate-400">Configure questions the AI agent can answer and PBX transfer extensions</p>
+                    <p class="text-xs text-slate-400">Configure business FAQ, office directions, and PBX department extensions</p>
                 </div>
             </div>
 
@@ -259,6 +284,10 @@
     <script>
         let currentFilter = 'all';
         let searchQuery = '';
+        let currentPage = 1;
+        let pageSize = 25;
+        let totalPages = 1;
+        let totalCount = 0;
         let allCallsData = [];
         let searchTimeout = null;
         let activeModalId = null;
@@ -267,6 +296,17 @@
         let urgencyChartInstance = null;
         let deptChartInstance = null;
         let sentimentChartInstance = null;
+
+        // XSS Sanitizer Utility
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
 
         // WebSocket Connection
         function setupWebSocket() {
@@ -282,7 +322,7 @@
                 try {
                     const data = JSON.parse(event.data);
                     if (data.event === 'new_call') {
-                        showToast(`New call received from ${data.caller_name || 'Caller'}`);
+                        showToast(`New call received from ${escapeHtml(data.caller_name || 'Caller')}`);
                     }
                     loadDashboard();
                 } catch (e) {}
@@ -296,7 +336,7 @@
 
         async function loadDashboard() {
             try {
-                let url = '/api/calls?status=' + currentFilter;
+                let url = `/api/calls?page=${currentPage}&page_size=${pageSize}&status=${currentFilter}`;
                 const dept = document.getElementById('filter-dept').value;
                 const urgency = document.getElementById('filter-urgency').value;
                 if (dept) url += '&department=' + encodeURIComponent(dept);
@@ -307,8 +347,12 @@
                     fetch(url),
                     fetch('/api/stats')
                 ]);
-                allCallsData = await callsRes.json();
+                const callsPayload = await callsRes.json();
                 const stats = await statsRes.json();
+
+                allCallsData = callsPayload.items || [];
+                totalCount = callsPayload.total || 0;
+                totalPages = callsPayload.total_pages || 1;
 
                 document.getElementById('stat-total').innerText = stats.total_calls;
                 document.getElementById('stat-pending').innerText = stats.pending_callbacks;
@@ -317,29 +361,62 @@
                 document.getElementById('stat-duration').innerText = (stats.avg_duration_seconds || 0) + 's';
 
                 renderTable(allCallsData);
+                renderPagination(callsPayload);
                 renderCharts(stats);
             } catch (err) {
                 console.error('Error loading dashboard:', err);
             }
         }
 
+        function resetPageAndLoad() {
+            currentPage = 1;
+            loadDashboard();
+        }
+
+        function clearAllFilters() {
+            currentFilter = 'all';
+            document.getElementById('filter-dept').value = '';
+            document.getElementById('filter-urgency').value = '';
+            document.getElementById('search-input').value = '';
+            searchQuery = '';
+            setFilter('all');
+        }
+
         function setFilter(filter) {
             currentFilter = filter;
             document.querySelectorAll('[id^="btn-"]').forEach(btn => {
-                if (btn.id.startsWith('btn-') && !btn.id.includes('analytics')) {
+                if (btn.id.startsWith('btn-') && !btn.id.includes('analytics') && !btn.id.includes('page')) {
                     btn.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition';
                 }
             });
             document.getElementById('btn-' + filter).className = 'px-3 py-1.5 rounded-lg font-semibold text-white bg-blue-600 transition';
-            loadDashboard();
+            resetPageAndLoad();
         }
 
         function debounceSearch() {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
                 searchQuery = document.getElementById('search-input').value;
-                loadDashboard();
+                resetPageAndLoad();
             }, 300);
+        }
+
+        function changePage(delta) {
+            const next = currentPage + delta;
+            if (next >= 1 && next <= totalPages) {
+                currentPage = next;
+                loadDashboard();
+            }
+        }
+
+        function renderPagination(payload) {
+            const start = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+            const end = Math.min(totalCount, currentPage * pageSize);
+            document.getElementById('pagination-info').innerText = `Showing ${start} to ${end} of ${totalCount} calls`;
+            document.getElementById('page-indicator').innerText = `Page ${currentPage} of ${totalPages}`;
+
+            document.getElementById('btn-prev-page').disabled = (currentPage <= 1);
+            document.getElementById('btn-next-page').disabled = (currentPage >= totalPages);
         }
 
         function renderTable(calls) {
@@ -368,35 +445,35 @@
 
                 return `
                 <tr class="hover:bg-slate-900/60 transition">
-                    <td class="p-3.5 text-slate-400 whitespace-nowrap">${dateStr}</td>
+                    <td class="p-3.5 text-slate-400 whitespace-nowrap">${escapeHtml(dateStr)}</td>
                     <td class="p-3.5 font-semibold text-white">
-                        ${c.caller_name}
-                        ${c.company ? `<span class="block text-[11px] font-normal text-slate-400">${c.company}</span>` : ''}
+                        ${escapeHtml(c.caller_name)}
+                        ${c.company ? `<span class="block text-[11px] font-normal text-slate-400">${escapeHtml(c.company)}</span>` : ''}
                     </td>
                     <td class="p-3.5 whitespace-nowrap">
                         <div class="flex items-center gap-1.5">
-                            <a href="tel:${c.caller_phone}" class="text-blue-400 hover:text-blue-300 font-medium">
-                                ${c.caller_phone}
+                            <a href="tel:${escapeHtml(c.caller_phone)}" class="text-blue-400 hover:text-blue-300 font-medium">
+                                ${escapeHtml(c.caller_phone)}
                             </a>
-                            <button onclick="clickToDial('${c.caller_phone}')" title="Dial via Yeastar S100 Desk Phone" class="px-1.5 py-0.5 rounded bg-blue-600/15 hover:bg-blue-600/30 text-blue-400 text-[10px] font-bold border border-blue-500/20">
+                            <button onclick="clickToDial('${escapeHtml(c.caller_phone)}')" title="Dial via Yeastar S100 Desk Phone" class="px-1.5 py-0.5 rounded bg-blue-600/15 hover:bg-blue-600/30 text-blue-400 text-[10px] font-bold border border-blue-500/20">
                                 <i class="fa-solid fa-phone-flip"></i> Yeastar
                             </button>
                         </div>
-                        ${c.caller_email ? `<span class="block text-[10px] text-slate-400">${c.caller_email}</span>` : ''}
-                        ${c.preferred_callback_time ? `<span class="block text-[10px] text-slate-400 mt-0.5"><i class="fa-regular fa-clock"></i> ${c.preferred_callback_time}</span>` : ''}
+                        ${c.caller_email ? `<span class="block text-[10px] text-slate-400">${escapeHtml(c.caller_email)}</span>` : ''}
+                        ${c.preferred_callback_time ? `<span class="block text-[10px] text-slate-400 mt-0.5"><i class="fa-regular fa-clock"></i> ${escapeHtml(c.preferred_callback_time)}</span>` : ''}
                     </td>
                     <td class="p-3.5 max-w-xs">
-                        <span class="font-medium text-slate-200 block truncate">${c.reason}</span>
-                        <span class="text-slate-400 block truncate text-[11px]">${c.ai_summary || c.details}</span>
+                        <span class="font-medium text-slate-200 block truncate">${escapeHtml(c.reason)}</span>
+                        <span class="text-slate-400 block truncate text-[11px]">${escapeHtml(c.ai_summary || c.details)}</span>
                     </td>
                     <td class="p-3.5 whitespace-nowrap text-slate-300">
-                        ${c.department || 'General'}
+                        ${escapeHtml(c.department || 'General')}
                     </td>
                     <td class="p-3.5 whitespace-nowrap">
-                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${urgencyClass}">${c.urgency}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${urgencyClass}">${escapeHtml(c.urgency)}</span>
                     </td>
                     <td class="p-3.5 whitespace-nowrap">
-                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${statusClass}">${(c.status || '').replace('_', ' ')}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${statusClass}">${escapeHtml((c.status || '').replace('_', ' '))}</span>
                     </td>
                     <td class="p-3.5 text-right whitespace-nowrap">
                         <div class="flex items-center justify-end gap-1.5">
@@ -454,10 +531,21 @@
             document.getElementById('modal-transcript').innerText = item.transcript || 'No transcript recorded.';
             document.getElementById('modal-notes').value = item.notes || '';
 
+            // Audio Player
+            const audioContainer = document.getElementById('modal-audio-container');
+            const audioPlayer = document.getElementById('modal-audio-player');
+            if (item.audio_url) {
+                audioPlayer.src = item.audio_url;
+                audioContainer.classList.remove('hidden');
+            } else {
+                audioContainer.classList.add('hidden');
+            }
+
+            // Action Items
             const actionContainer = document.getElementById('modal-action-items-container');
             const actionList = document.getElementById('modal-action-items');
             if (item.action_items && item.action_items.length > 0) {
-                actionList.innerHTML = item.action_items.map(act => `<li>${act}</li>`).join('');
+                actionList.innerHTML = item.action_items.map(act => `<li>${escapeHtml(act)}</li>`).join('');
                 actionContainer.classList.remove('hidden');
             } else {
                 actionContainer.classList.add('hidden');
@@ -468,6 +556,8 @@
 
         function closeModal() {
             document.getElementById('transcript-modal').classList.add('hidden');
+            const audioPlayer = document.getElementById('modal-audio-player');
+            if (audioPlayer) audioPlayer.pause();
             activeModalId = null;
         }
 

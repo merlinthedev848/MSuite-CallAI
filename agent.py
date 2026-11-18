@@ -153,7 +153,7 @@ def create_tools(intake: CallerIntake) -> list:
         status_info = await yeastar_client.get_extension_status(ext)
         logger.info(f"Yeastar extension {ext} status: {status_info.get('status')}")
 
-        return f"Please hold while I transfer you to extension {ext}."
+        return f"Please hold for just a moment while I transfer you to extension {ext}."
 
     return [record_caller_identity, record_inquiry_details, search_knowledge_base, transfer_call_to_staff]
 
@@ -164,6 +164,7 @@ async def entrypoint(ctx: JobContext):
 
     intake = CallerIntake(call_id=ctx.room.name)
     start_time = time.time()
+    silence_count = 0
 
     # Handle race condition: check if participant already connected before listener
     participant = next(iter(ctx.room.remote_participants.values()), None)
@@ -203,7 +204,7 @@ async def entrypoint(ctx: JobContext):
         llm=llm_instance,
         tts=tts_instance,
         vad=vad_instance,
-        user_away_timeout=25.0,
+        user_away_timeout=config.silence_timeout_seconds,
     )
 
     # Start voice session in the room
@@ -216,6 +217,23 @@ async def entrypoint(ctx: JobContext):
         )
     except Exception as e:
         logger.warning(f"Greeting could not be delivered (caller disconnected early): {e}")
+
+    # DTMF Handler
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet):
+        try:
+            raw_data = data_packet.data.decode("utf-8")
+            logger.info(f"Received telephone data/DTMF: {raw_data}")
+            if "1" in raw_data:
+                intake.department = "Technical Support"
+                asyncio.create_task(session.say("Routing you to Technical Support."))
+            elif "2" in raw_data:
+                intake.department = "Sales & Billing"
+                asyncio.create_task(session.say("Routing you to Sales and Billing."))
+            elif "0" in raw_data:
+                asyncio.create_task(session.say("Transferring you to the main receptionist."))
+        except Exception as e:
+            logger.warning(f"Error handling DTMF data packet: {e}")
 
     async def handle_call_ended():
         duration = int(time.time() - start_time)

@@ -1,23 +1,26 @@
 [project]
 name = "phone-ai-agent"
-version = "0.1.0"
-description = "Real-Time AI Phone Receptionist & Intake Agent for PBX / VoIP systems"
+version = "1.2.0"
+description = "Enterprise-grade real-time AI Phone Receptionist & Yeastar S100 PBX Dispatch System"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "livekit-agents>=0.12.0",
-    "livekit-plugins-silero>=0.7.0",
-    "livekit-plugins-deepgram>=0.8.0",
-    "livekit-plugins-openai>=0.10.0",
-    "livekit-plugins-cartesia>=0.6.0",
-    "livekit-plugins-elevenlabs>=0.7.0",
+    "livekit-agents>=1.8.0",
+    "livekit-plugins-silero>=1.8.0",
+    "livekit-plugins-deepgram>=1.8.0",
+    "livekit-plugins-openai>=1.8.0",
+    "livekit-plugins-cartesia>=1.8.0",
+    "livekit-plugins-elevenlabs>=1.8.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.0",
     "aiohttp>=3.9.0",
     "aiosmtplib>=3.0.0",
     "twilio>=9.0.0",
     "fastapi>=0.110.0",
-    "uvicorn>=0.29.0"
+    "uvicorn>=0.29.0",
+    "httpx>=0.27.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0"
 ]
 
 [tool.pytest.ini_options]

@@ -9,11 +9,9 @@ services:
       - .env
     volumes:
       - ./calls.db:/app/calls.db
-    # To run both the web dashboard and the LiveKit agent worker in the container:
-    command: >
-      sh -c "python agent.py start & uvicorn server:app --host 0.0.0.0 --port 8000"
+      - ./company_knowledge.json:/app/company_knowledge.json
 
-  # Optional local Ollama container if you wish to host Ollama alongside the agent
+  # Optional local Ollama container if you wish to host Ollama on the same server
   # ollama:
   #   image: ollama/ollama:latest
   #   container_name: ollama

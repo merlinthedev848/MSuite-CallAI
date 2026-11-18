@@ -2,16 +2,18 @@ import csv
 import io
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from database import (
     get_all_records,
+    get_records_count,
     get_record_by_id,
     delete_call_record,
     update_call_status,
@@ -26,15 +28,15 @@ logger = logging.getLogger("phone_agent.server")
 
 app = FastAPI(
     title="Phone AI Agent - Call Intake & Dispatch Hub",
-    description="Production-grade real-time voice receptionist and PBX dispatch API",
+    description="Enterprise-grade real-time voice receptionist and PBX dispatch API",
     version="1.2.0"
 )
 
-# Enable CORS for cross-origin or local network access
+# Robust CORS policy configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_origins,
-    allow_credentials=True,
+    allow_credentials=not config.is_cors_wildcard,  # True credentials disallowed with wildcard '*'
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,6 +44,9 @@ app.add_middleware(
 init_db()
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.html"
+
+# In-memory click-to-dial rate limiter
+_last_dial_times: Dict[str, float] = {}
 
 
 class ConnectionManager:
@@ -105,7 +110,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keepalive listener
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -121,17 +125,33 @@ def api_get_calls(
     department: Optional[str] = Query(None, description="Filter by department"),
     urgency: Optional[str] = Query(None, description="Filter by urgency: low, medium, high, emergency"),
     search: Optional[str] = Query(None, description="Text search across caller, notes, transcript"),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0)
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(25, ge=1, le=200, description="Items per page")
 ):
-    return get_all_records(
-        limit=limit,
+    offset = (page - 1) * page_size
+    items = get_all_records(
+        limit=page_size,
         offset=offset,
         status=status,
         department=department,
         urgency=urgency,
         search=search
     )
+    total_count = get_records_count(
+        status=status,
+        department=department,
+        urgency=urgency,
+        search=search
+    )
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 @app.get("/api/calls/{call_id}")
@@ -143,10 +163,12 @@ def api_get_single_call(call_id: int):
 
 
 @app.delete("/api/calls/{call_id}")
-def api_delete_call(call_id: int):
+async def api_delete_call(call_id: int):
     success = delete_call_record(call_id)
     if not success:
         raise HTTPException(status_code=404, detail="Call record not found")
+
+    await ws_manager.broadcast({"event": "call_deleted", "call_id": call_id})
     return {"success": True, "deleted_id": call_id}
 
 
@@ -173,10 +195,31 @@ async def api_update_status(call_id: int, req: StatusUpdateRequest):
 
 @app.post("/api/dial")
 async def api_click_to_dial(req: ClickToDialRequest):
-    """Triggers Yeastar S100 to ring staff desk phone and bridge to caller."""
+    """Triggers Yeastar S100 to ring staff desk phone and bridge to caller with throttling."""
     ext = req.staff_extension or config.default_staff_extension
+    now = time.time()
+    last_time = _last_dial_times.get(ext, 0.0)
+
+    # Throttle: at least 2 seconds between dials per extension
+    if now - last_time < 2.0:
+        raise HTTPException(status_code=429, detail="Dialing throttled. Please wait 2 seconds between calls.")
+
+    _last_dial_times[ext] = now
     result = await yeastar_client.originate_call(desk_extension=ext, destination_phone=req.caller_phone)
     return result
+
+
+@app.post("/api/webhook/yeastar")
+async def api_yeastar_webhook(request: Request):
+    """Receives event notifications (inbound, CDR, hangup) from Yeastar S100."""
+    try:
+        body = await request.json()
+        logger.info(f"Received Yeastar Webhook event: {body}")
+        await ws_manager.broadcast({"event": "yeastar_event", "data": body})
+        return {"status": "received"}
+    except Exception as e:
+        logger.warning(f"Error processing Yeastar webhook: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/api/stats")
@@ -201,7 +244,7 @@ def api_save_knowledge(data: Dict[str, Any]):
 
 @app.get("/api/export/csv")
 def api_export_csv():
-    records = get_all_records(limit=2000)
+    records = get_all_records(limit=5000)
     output = io.StringIO()
     writer = csv.writer(output)
     

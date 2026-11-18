@@ -1,7 +1,7 @@
 import re
 import logging
 import aiohttp
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from config import config
 
 logger = logging.getLogger("phone_agent.yeastar")
@@ -11,7 +11,7 @@ class YeastarS100Client:
     """
     Robust API Client for Yeastar S-Series (S100, S50, S20, S300) and P-Series PBXs.
     Handles token authentication, automatic session refresh, Click-to-Dial originating,
-    and extension presence querying.
+    CDR retrieval, and extension presence querying.
     """
 
     def __init__(
@@ -28,7 +28,6 @@ class YeastarS100Client:
         self.password = password or config.yeastar_password
         self.use_https = use_https
         self.token: Optional[str] = None
-        # Simulated mode if no physical credentials or host is default dummy
         self.simulated_mode = not bool(self.password and self.password != "api_pass")
 
     @property
@@ -110,7 +109,7 @@ class YeastarS100Client:
         payload = {
             "extid": clean_ext,
             "outbound": clean_dest,
-            "autoanswer": "yes"
+            "autoanswer": "yes" if config.yeastar_auto_answer else "no"
         }
 
         for attempt in range(2):
@@ -118,7 +117,6 @@ class YeastarS100Client:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url, json=payload, ssl=False, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                         data = await resp.json()
-                        # If token expired (error code 10003 in Yeastar)
                         if data.get("status") == "Failed" and "token" in str(data.get("errno", "")).lower():
                             logger.info("Yeastar token expired. Re-authenticating...")
                             await self.login()
@@ -165,6 +163,45 @@ class YeastarS100Client:
                     return data
         except Exception as e:
             return {"extension": clean_ext, "status": "Unknown", "error": str(e)}
+
+    async def get_cdr_records(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Queries historical Call Detail Records directly from Yeastar S100."""
+        if self.simulated_mode:
+            return []
+
+        if not self.token:
+            await self.login()
+
+        url = f"{self.base_url}/cdr/query?token={self.token}&page=1&page_size={limit}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, ssl=False, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("cdr", [])
+                    return []
+        except Exception as e:
+            logger.error(f"Failed to query Yeastar CDR records: {e}")
+            return []
+
+    async def hangup_call(self, channel_id: str) -> bool:
+        """Terminates an active call channel on Yeastar PBX."""
+        if self.simulated_mode:
+            return True
+
+        if not self.token:
+            await self.login()
+
+        url = f"{self.base_url}/call/hangup?token={self.token}"
+        payload = {"channel": channel_id}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, ssl=False, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    data = await resp.json()
+                    return data.get("status") == "Success"
+        except Exception as e:
+            logger.error(f"Failed to hang up channel {channel_id}: {e}")
+            return False
 
 
 yeastar_client = YeastarS100Client()
