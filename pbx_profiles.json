@@ -1,0 +1,57 @@
+{
+  "yeastar_s_series": {
+    "name": "Yeastar S100 / S-Series & P-Series",
+    "trunk_type": "Register Trunk (preferred behind NAT) or Peer Trunk",
+    "sip_port": 5060,
+    "transport": "UDP / TLS",
+    "codecs": ["PCMU", "PCMA", "G.722", "Opus"],
+    "dtmf_mode": "RFC4733 / RFC2833",
+    "nat_mode": "Yes (PBX -> General -> SIP -> NAT)",
+    "docs": "yeastar_setup.md"
+  },
+  "grandstream_ucm": {
+    "name": "Grandstream UCM 6200 / 6300 Series",
+    "trunk_type": "SIP Register Trunk or Peer Trunk (VoIP Trunks > SIP Trunks)",
+    "sip_port": 5060,
+    "transport": "UDP",
+    "codecs": ["PCMU", "PCMA", "Opus", "G.722"],
+    "dtmf_mode": "RFC2833"
+  },
+  "freepbx_asterisk": {
+    "name": "FreePBX / chan_pjsip",
+    "trunk_type": "PJSIP Trunk (Outbound Registration or IP Auth)",
+    "sip_port": 5060,
+    "transport": "UDP",
+    "codecs": ["opus", "ulaw", "alaw"],
+    "dtmf_mode": "rfc4733"
+  },
+  "three_cx": {
+    "name": "3CX Phone System",
+    "trunk_type": "Generic SIP Trunk (Account/Register based)",
+    "sip_port": 5060,
+    "transport": "UDP",
+    "codecs": ["G.711u", "G.711a", "Opus"],
+    "dtmf_mode": "RFC2833"
+  },
+  "ringcentral": {
+    "name": "RingCentral Cloud PBX",
+    "trunk_type": "Cloud SIP Trunking / Forward to External SIP URI",
+    "sip_port": 5060,
+    "transport": "TLS / UDP",
+    "codecs": ["G.711u", "Opus"]
+  },
+  "cisco_cucm": {
+    "name": "Cisco Unified Communications Manager (CUCM)",
+    "trunk_type": "SIP Trunk (Device > Trunk > SIP Trunk)",
+    "sip_port": 5060,
+    "transport": "TCP / UDP",
+    "codecs": ["G.711u", "G.711a"]
+  },
+  "generic_carrier": {
+    "name": "Direct Carrier Trunks (Twilio / Telnyx / Flowroute / Bandwidth)",
+    "trunk_type": "Elastic SIP Trunk / TwiML / SIP URI forwarding",
+    "sip_port": 5060,
+    "transport": "UDP / TLS",
+    "codecs": ["PCMU", "PCMA", "Opus"]
+  }
+}

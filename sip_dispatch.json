@@ -1,0 +1,17 @@
+{
+  "trunk": {
+    "name": "pbx-inbound-trunk",
+    "numbers": ["*"],
+    "allowed_addresses": ["0.0.0.0/0"],
+    "auth_username": "livekit_sip_user",
+    "auth_password": "your-secure-sip-password"
+  },
+  "dispatch_rule": {
+    "name": "route-all-to-phone-agent",
+    "rule": {
+      "dispatchRuleIndividual": {
+        "roomPrefix": "phone-call-"
+      }
+    }
+  }
+}

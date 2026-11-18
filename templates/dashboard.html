@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{COMPANY_NAME}} - Phone Intake Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+                    <i class="fa-solid fa-headset text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">{{COMPANY_NAME}}</h1>
+                    <p class="text-xs text-slate-400">AI Phone Receptionist & Intake Center</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/api/export/csv" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium rounded-lg border border-slate-700 flex items-center gap-2 transition">
+                    <i class="fa-solid fa-file-csv text-emerald-400"></i> Export CSV
+                </a>
+                <button onclick="loadDashboard()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow-md transition flex items-center gap-2">
+                    <i class="fa-solid fa-rotate-right"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+                <p class="text-xs font-semibold uppercase text-slate-400">Total Calls Logged</p>
+                <p id="stat-total" class="text-3xl font-extrabold text-white mt-2">-</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+                <p class="text-xs font-semibold uppercase text-amber-400">Pending Callbacks</p>
+                <p id="stat-pending" class="text-3xl font-extrabold text-amber-300 mt-2">-</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+                <p class="text-xs font-semibold uppercase text-rose-400">Urgent Inquiries</p>
+                <p id="stat-urgent" class="text-3xl font-extrabold text-rose-400 mt-2">-</p>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+                <p class="text-xs font-semibold uppercase text-emerald-400">Completed Callbacks</p>
+                <p id="stat-completed" class="text-3xl font-extrabold text-emerald-300 mt-2">-</p>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <div class="flex items-center gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700 text-sm">
+                <button onclick="setFilter('all')" id="btn-all" class="px-3 py-1.5 rounded-md font-medium text-white bg-blue-600 transition">All</button>
+                <button onclick="setFilter('new')" id="btn-new" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition">New</button>
+                <button onclick="setFilter('in_progress')" id="btn-in_progress" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition">In Progress</button>
+                <button onclick="setFilter('called_back')" id="btn-called_back" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition">Called Back</button>
+                <button onclick="setFilter('archived')" id="btn-archived" class="px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition">Archived</button>
+            </div>
+            <div class="text-xs text-slate-400">
+                Auto-refreshing every 15s • Powered by LiveKit, Yeastar & Ollama
+            </div>
+        </div>
+
+        <!-- Calls Table -->
+        <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-950/40 text-slate-400 text-xs uppercase font-semibold border-b border-slate-700">
+                            <th class="p-4">Time</th>
+                            <th class="p-4">Caller</th>
+                            <th class="p-4">Contact</th>
+                            <th class="p-4">Reason & Summary</th>
+                            <th class="p-4">Urgency</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="calls-tbody" class="divide-y divide-slate-700/60 text-sm">
+                        <tr>
+                            <td colspan="7" class="p-8 text-center text-slate-400">Loading call records...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Transcript Modal -->
+    <div id="transcript-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative">
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+                    <i class="fa-solid fa-file-lines"></i>
+                </div>
+                <h3 id="modal-title" class="text-lg font-bold text-white">Call Transcript & Analysis</h3>
+            </div>
+            <div id="modal-summary-box" class="bg-blue-950/40 border border-blue-800/50 rounded-lg p-4 mb-4 text-sm text-blue-200"></div>
+            <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-xs font-mono text-slate-300 max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed" id="modal-transcript"></div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-semibold transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFilter = 'all';
+        let allCallsData = [];
+
+        async function loadDashboard() {
+            try {
+                const [callsRes, statsRes] = await Promise.all([
+                    fetch('/api/calls' + (currentFilter !== 'all' ? '?status=' + currentFilter : '')),
+                    fetch('/api/stats')
+                ]);
+                allCallsData = await callsRes.json();
+                const stats = await statsRes.json();
+
+                document.getElementById('stat-total').innerText = stats.total_calls;
+                document.getElementById('stat-pending').innerText = stats.pending_callbacks;
+                document.getElementById('stat-urgent').innerText = stats.urgent_pending;
+                document.getElementById('stat-completed').innerText = stats.called_back;
+
+                renderTable(allCallsData);
+            } catch (err) {
+                console.error('Error loading dashboard:', err);
+            }
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('[id^="btn-"]').forEach(btn => {
+                btn.className = 'px-3 py-1.5 rounded-md font-medium text-slate-400 hover:text-white transition';
+            });
+            document.getElementById('btn-' + filter).className = 'px-3 py-1.5 rounded-md font-medium text-white bg-blue-600 transition';
+            loadDashboard();
+        }
+
+        function renderTable(calls) {
+            const tbody = document.getElementById('calls-tbody');
+            if (!calls || calls.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-400">No calls matching this filter.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = calls.map(c => {
+                const urgencyClass = {
+                    'emergency': 'bg-rose-500/20 text-rose-400 border border-rose-500/30',
+                    'high': 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
+                    'medium': 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+                    'low': 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }[(c.urgency || '').toLowerCase()] || 'bg-slate-700 text-slate-300';
+
+                const statusClass = {
+                    'new': 'bg-sky-500/20 text-sky-400',
+                    'in_progress': 'bg-yellow-500/20 text-yellow-400',
+                    'called_back': 'bg-emerald-500/20 text-emerald-400',
+                    'archived': 'bg-slate-600/30 text-slate-400'
+                }[c.status] || 'bg-slate-700 text-slate-300';
+
+                const dateStr = c.created_at ? new Date(c.created_at).toLocaleString() : 'Just now';
+
+                return `
+                <tr class="hover:bg-slate-750 transition">
+                    <td class="p-4 text-xs text-slate-400 whitespace-nowrap">${dateStr}</td>
+                    <td class="p-4 font-semibold text-white">
+                        ${c.caller_name}
+                        ${c.company ? `<span class="block text-xs font-normal text-slate-400">${c.company}</span>` : ''}
+                    </td>
+                    <td class="p-4 whitespace-nowrap">
+                        <a href="tel:${c.caller_phone}" class="text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1.5">
+                            <i class="fa-solid fa-phone text-xs"></i> ${c.caller_phone}
+                        </a>
+                        ${c.preferred_callback_time ? `<span class="block text-xs text-slate-400 mt-0.5">Pref: ${c.preferred_callback_time}</span>` : ''}
+                    </td>
+                    <td class="p-4 max-w-xs">
+                        <span class="font-medium text-slate-200 block truncate">${c.reason}</span>
+                        <span class="text-xs text-slate-400 block truncate">${c.ai_summary || c.details}</span>
+                    </td>
+                    <td class="p-4 whitespace-nowrap">
+                        <span class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase ${urgencyClass}">${c.urgency}</span>
+                    </td>
+                    <td class="p-4 whitespace-nowrap">
+                        <span class="px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusClass}">${(c.status || '').replace('_', ' ')}</span>
+                    </td>
+                    <td class="p-4 text-right whitespace-nowrap">
+                        <div class="flex items-center justify-end gap-2">
+                            <button onclick="showModal(${c.id})" class="p-2 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition" title="View Transcript">
+                                <i class="fa-regular fa-file-lines"></i>
+                            </button>
+                            ${c.status !== 'called_back' ? `
+                            <button onclick="updateStatus(${c.id}, 'called_back')" class="px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-semibold transition" title="Mark Called Back">
+                                <i class="fa-solid fa-check"></i> Resolved
+                            </button>` : ''}
+                            ${c.status !== 'archived' ? `
+                            <button onclick="updateStatus(${c.id}, 'archived')" class="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-slate-200 transition" title="Archive">
+                                <i class="fa-solid fa-box-archive text-xs"></i>
+                            </button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        function showModal(recordId) {
+            const item = allCallsData.find(c => c.id === recordId);
+            if (!item) return;
+
+            document.getElementById('modal-title').innerText = `${item.caller_name} - Details & Transcript`;
+            document.getElementById('modal-summary-box').innerHTML = `
+                <strong>Summary / Message:</strong><br>
+                ${item.ai_summary || item.details}
+            `;
+            document.getElementById('modal-transcript').innerText = item.transcript || 'No full transcript recorded.';
+            document.getElementById('transcript-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('transcript-modal').classList.add('hidden');
+        }
+
+        async function updateStatus(id, newStatus) {
+            try {
+                await fetch(`/api/calls/${id}/status`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: newStatus})
+                });
+                loadDashboard();
+            } catch (err) {
+                alert('Failed to update status');
+            }
+        }
+
+        // Initial load and periodic refresh
+        loadDashboard();
+        setInterval(loadDashboard, 15000);
+    </script>
+</body>
+</html>
