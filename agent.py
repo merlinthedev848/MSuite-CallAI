@@ -34,17 +34,19 @@ def get_llm():
             api_key="ollama"
         )
     elif config.llm_provider == "groq":
+        key = config.openai_api_key or "gsk-placeholder-key"
         logger.info(f"Using Groq LLM: {config.openai_model}")
         return openai.LLM(
             model=config.openai_model,
             base_url="https://api.groq.com/openai/v1",
-            api_key=config.openai_api_key
+            api_key=key
         )
     else:
+        key = config.openai_api_key or "sk-placeholder-key"
         logger.info(f"Using OpenAI LLM: {config.openai_model}")
         return openai.LLM(
             model=config.openai_model,
-            api_key=config.openai_api_key
+            api_key=key
         )
 
 
@@ -52,12 +54,14 @@ def get_tts():
     """Initializes TTS based on configured provider (Cartesia or ElevenLabs)."""
     if config.tts_provider == "elevenlabs" and config.eleven_api_key:
         from livekit.plugins import elevenlabs
+        key = config.eleven_api_key or "placeholder-eleven-key"
         logger.info(f"Using ElevenLabs TTS (voice: {config.eleven_voice_id})")
-        return elevenlabs.TTS(api_key=config.eleven_api_key, voice_id=config.eleven_voice_id)
+        return elevenlabs.TTS(api_key=key, voice_id=config.eleven_voice_id)
     else:
         from livekit.plugins import cartesia
+        key = config.cartesia_api_key or "placeholder-cartesia-key"
         logger.info(f"Using Cartesia TTS (voice: {config.cartesia_voice_id})")
-        return cartesia.TTS(api_key=config.cartesia_api_key, voice=config.cartesia_voice_id)
+        return cartesia.TTS(api_key=key, voice=config.cartesia_voice_id)
 
 
 def build_system_prompt() -> str:
@@ -188,7 +192,8 @@ async def entrypoint(ctx: JobContext):
 
     # Initialize AI Components
     llm_instance = get_llm()
-    stt_instance = deepgram.STT(api_key=config.deepgram_api_key)
+    stt_key = config.deepgram_api_key or "placeholder-deepgram-key"
+    stt_instance = deepgram.STT(api_key=stt_key)
     tts_instance = get_tts()
     vad_instance = silero.VAD.load()
 

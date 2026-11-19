@@ -1,0 +1,5 @@
+# Force LF for all shell scripts so Linux containers don't fail on Windows CRLF
+*.sh text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf

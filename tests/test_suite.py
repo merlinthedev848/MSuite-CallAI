@@ -2,6 +2,7 @@ import pytest
 import os
 import sys
 import json
+import threading
 from pathlib import Path
 
 # Add project root to sys.path
@@ -21,8 +22,9 @@ from database import (
 )
 from knowledge_base import knowledge_base
 from yeastar_client import yeastar_client
-from notifications import CallerIntake, generate_email_html
+from notifications import CallerIntake, generate_email_html, enrich_with_local_ollama
 from server import app
+import agent
 
 client = TestClient(app)
 
@@ -87,6 +89,56 @@ def test_database_crud_and_migrations():
     assert get_record_by_id(rec_id) is None
 
 
+def test_database_concurrency():
+    """Validates that SQLite in WAL mode handles multiple simultaneous thread writes without locking."""
+    init_db()
+    errors = []
+
+    def writer_task(idx):
+        try:
+            r = CallRecord(
+                call_id=f"concurrent-test-{idx}",
+                caller_name=f"Concurrent User {idx}",
+                caller_phone=f"+1555000{idx:04d}",
+                reason="Stress testing database WAL mode",
+                details="Testing concurrent execution",
+                urgency="low",
+                status="new"
+            )
+            save_call_record(r)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer_task, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(errors) == 0, f"Concurrent database write errors: {errors}"
+
+
+def test_agent_initialization():
+    """Validates that voice agent components, system prompt, and tools initialize cleanly."""
+    prompt = agent.build_system_prompt()
+    assert len(prompt) > 50
+    assert "receptionist" in prompt.lower()
+
+    sample_intake = agent.CallerIntake()
+    tools = agent.create_tools(sample_intake)
+    assert len(tools) == 4
+
+    llm = agent.get_llm()
+    assert llm is not None
+
+    tts = agent.get_tts()
+    assert tts is not None
+
+    from livekit.agents.voice import Agent
+    test_agent = Agent(instructions=prompt, tools=tools)
+    assert test_agent is not None
+
+
 def test_knowledge_base_lookups():
     hours = knowledge_base.search_faq("what are your hours of operation?")
     assert "8:30" in hours or "hours" in hours.lower()
@@ -96,6 +148,9 @@ def test_knowledge_base_lookups():
 
     billing_ext = knowledge_base.get_department_extension("Sales & Billing")
     assert billing_ext == "1002"
+
+    fallback = knowledge_base.search_faq("random obscure question about space")
+    assert len(fallback) > 10
 
 
 @pytest.mark.asyncio
@@ -132,6 +187,21 @@ def test_email_html_structure():
     assert "Fleet Tracking Server Offline" in html
     assert "Restart telemetry service" in html
     assert "#telemetry" in html
+
+
+@pytest.mark.asyncio
+async def test_ollama_enrichment_fallback():
+    """Validates that offline Ollama gracefully generates fallback summary without crashing."""
+    intake = CallerIntake(
+        caller_name="Fallback Tester",
+        caller_phone="+15551112222",
+        reason="Offline Fallback Test",
+        details="Verifying fallback when Ollama is offline.",
+        transcript="Caller: Hello.\nAssistant: Hi, how can I help?"
+    )
+    await enrich_with_local_ollama(intake)
+    assert intake.ai_summary is not None
+    assert "Fallback Tester" in intake.ai_summary
 
 
 def test_api_endpoints_full_lifecycle():
